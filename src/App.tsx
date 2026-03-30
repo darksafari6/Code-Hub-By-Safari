@@ -3,6 +3,8 @@ import { Terminal } from 'xterm';
 import { FitAddon } from 'xterm-addon-fit';
 import 'xterm/css/xterm.css';
 import { Toaster, toast } from 'sonner';
+import { GoogleGenAI } from '@google/genai';
+import { motion, AnimatePresence } from 'motion/react';
 import { cn } from './lib/utils';
 import { ActivityBar } from './components/layout/ActivityBar';
 import { SideBar } from './components/layout/SideBar';
@@ -12,6 +14,10 @@ import { RightPanel } from './components/layout/RightPanel';
 import { StatusBar } from './components/layout/StatusBar';
 import { TitleBar } from './components/layout/TitleBar';
 import { SettingsModal } from './components/modals/SettingsModal';
+import { CommandPalette } from './components/modals/CommandPalette';
+
+// Initialize Gemini AI
+const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || '' });
 
 export default function App() {
   // Layout State
@@ -23,6 +29,7 @@ export default function App() {
   const [leftWidth, setLeftWidth] = useState(320);
   const [rightWidth, setRightWidth] = useState(400);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
   const [isMenuOpen, setIsMenuOpen] = useState(false);
 
   // File System State
@@ -34,6 +41,7 @@ export default function App() {
   // AI State
   const [chatHistory, setChatHistory] = useState<{role: string, content: string}[]>([]);
   const [chatInput, setChatInput] = useState('');
+  const [isAiLoading, setIsAiLoading] = useState(false);
   const [isAutoMode, setIsAutoMode] = useState(false);
   const [autoModeState, setAutoModeState] = useState<'idle' | 'planning' | 'paused' | 'running' | 'completed' | 'error'>('idle');
   const [executionPlan, setExecutionPlan] = useState<any[]>([]);
@@ -72,6 +80,11 @@ export default function App() {
     initTerminal();
     fetchGitStatus();
     
+    if (!process.env.GEMINI_API_KEY) {
+      console.warn('GEMINI_API_KEY is not set. AI features might not work.');
+      toast.warning('Gemini API key is missing. AI features will be limited.');
+    }
+
     const interval = setInterval(() => {
       setSystemStats({
         cpu: `${Math.floor(Math.random() * 20 + 5)}%`,
@@ -149,6 +162,10 @@ export default function App() {
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
+        e.preventDefault();
+        setIsCommandPaletteOpen(prev => !prev);
+      }
       if ((e.ctrlKey || e.metaKey) && e.key === 's') {
         e.preventDefault();
         if (currentFile && fileContent) {
@@ -238,24 +255,52 @@ export default function App() {
     setChatHistory(newHistory);
     const currentInput = chatInput;
     setChatInput('');
+    setIsAiLoading(true);
 
     try {
-      const endpoint = selectedModel === 'DeepSeek-Coder' ? '/api/ai/deepseek' : '/api/ai/chat';
-      const res = await fetch(endpoint, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          message: currentInput,
-          prompt: currentInput, // For DeepSeek
-          context: `Current file: ${currentFile}\nContent:\n${fileContent}`,
-          isOffline,
-          model: selectedModel
-        })
-      });
-      const data = await res.json();
-      setChatHistory([...newHistory, { role: 'ai', content: data.reply }]);
-    } catch (e) {
-      toast.error('AI Chat Error');
+      if (selectedModel === 'DeepSeek-Coder') {
+        const res = await fetch('/api/ai/deepseek', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ 
+            prompt: currentInput,
+            context: `Current file: ${currentFile}\nContent:\n${fileContent}`,
+            isOffline,
+            model: selectedModel
+          })
+        });
+        
+        if (!res.ok) {
+          const errorData = await res.json();
+          throw new Error(errorData.error || 'Failed to get response from DeepSeek');
+        }
+
+        const data = await res.json();
+        setChatHistory([...newHistory, { role: 'ai', content: data.reply }]);
+      } else {
+        // Call Gemini directly from frontend
+        if (!process.env.GEMINI_API_KEY) {
+          throw new Error('Gemini API key is not configured. Please add it to your environment variables.');
+        }
+
+        const response = await ai.models.generateContent({
+          model: 'gemini-3-flash-preview',
+          contents: `Context:\nCurrent file: ${currentFile}\nContent:\n${fileContent}\n\nUser: ${currentInput}`,
+          config: {
+            systemInstruction: "You are a professional coding assistant. Provide concise and accurate answers."
+          }
+        });
+        
+        const reply = response.text;
+        if (!reply) throw new Error('Empty response from Gemini');
+        setChatHistory([...newHistory, { role: 'ai', content: reply }]);
+      }
+    } catch (e: any) {
+      console.error('AI Chat Error:', e);
+      toast.error('AI Chat Error: ' + (e.message || 'Unknown error'));
+      setChatHistory([...newHistory, { role: 'ai', content: `Error: ${e.message || 'I encountered an issue processing your request.'}` }]);
+    } finally {
+      setIsAiLoading(false);
     }
   };
 
@@ -302,6 +347,18 @@ export default function App() {
     }
   };
 
+  const handleCommand = (command: string) => {
+    switch (command) {
+      case 'explorer': setActivityBarTab('explorer'); setIsSideBarVisible(true); break;
+      case 'search': setActivityBarTab('search'); setIsSideBarVisible(true); break;
+      case 'git': setActivityBarTab('git'); setIsSideBarVisible(true); break;
+      case 'ai': setActivityBarTab('ai'); setIsSideBarVisible(true); break;
+      case 'settings': setIsSettingsOpen(true); break;
+      case 'terminal': setIsTerminalVisible(!isTerminalVisible); break;
+      case 'auto-mode': setIsAutoMode(!isAutoMode); break;
+    }
+  };
+
   return (
     <div className={cn(
       "flex flex-col h-screen overflow-hidden select-none transition-colors duration-300",
@@ -336,6 +393,7 @@ export default function App() {
           chatInput={chatInput}
           setChatInput={setChatInput}
           handleChatSubmit={handleChatSubmit}
+          isAiLoading={isAiLoading}
           selectedModel={selectedModel}
           setSelectedModel={setSelectedModel}
           isRepo={isRepo}
@@ -394,6 +452,14 @@ export default function App() {
         setConfig={setAutoModeConfig}
         theme={theme}
         setTheme={setTheme}
+      />
+
+      <CommandPalette 
+        isOpen={isCommandPaletteOpen}
+        onClose={() => setIsCommandPaletteOpen(false)}
+        onCommand={handleCommand}
+        files={files}
+        openFile={openFile}
       />
     </div>
   );

@@ -207,7 +207,7 @@ async function startServer() {
   });
 
   app.post('/api/ai/deepseek', async (req, res) => {
-    const { prompt, model = 'deepseek-coder' } = req.body;
+    const { prompt, context, model = 'deepseek-coder' } = req.body;
     const apiKey = process.env.DEEPSEEK_API_KEY;
 
     if (!apiKey) {
@@ -215,11 +215,12 @@ async function startServer() {
     }
 
     try {
+      const fullPrompt = context ? `${context}\n\nUser Question: ${prompt}` : prompt;
       const response = await axios.post('https://api.deepseek.com/v1/chat/completions', {
         model: model,
         messages: [
-          { role: 'system', content: 'You are a professional coding assistant.' },
-          { role: 'user', content: prompt }
+          { role: 'system', content: 'You are a professional coding assistant. Use the provided context to answer accurately.' },
+          { role: 'user', content: fullPrompt }
         ],
         stream: false
       }, {
