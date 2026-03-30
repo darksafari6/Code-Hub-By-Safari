@@ -1,0 +1,10 @@
+{
+  "name": "ai-dev-studio-cli",
+  "version": "1.0.0",
+  "bin": {
+    "ai-dev": "./index.js"
+  },
+  "dependencies": {
+    "commander": "^11.0.0"
+  }
+}

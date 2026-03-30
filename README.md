@@ -1,11 +1,46 @@
-<div align="center">
+# Safari AI Dev Studio
 
-<img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
+A next-generation, autonomous AI Developer Studio built for Linux (Zorin OS).
 
-  <h1>Built with AI Studio</h2>
+## 🚀 Features
 
-  <p>The fastest path from prompt to production with Gemini.</p>
+- **Autonomous AI System:** Multi-agent planning (Planner, Executor, Debugger, Reviewer, Tester, DevOps)
+- **Real-time Code Editing:** Monaco editor with live synchronization
+- **Secure Sandbox:** All code execution happens in a secure `/workspace` environment
+- **Native Terminal:** Integrated `xterm.js` connected to a real `bash` shell
+- **Bonus Features:**
+  - Offline mode with local AI fallback
+  - AI self-learning system & smart caching
+  - Multi-output tabs (Preview, Console, Network)
+  - Split-screen resizing
+  - Auto-update system
 
-  <a href="https://aistudio.google.com/apps">Start building</a>
+## 🛠️ Installation (Zorin OS / Ubuntu / Debian)
 
-</div>
+1. **Run the setup script:**
+   ```bash
+   ./setup.sh
+   ```
+   This will install all necessary system dependencies, Node.js, and npm packages.
+
+2. **Start the Studio:**
+   ```bash
+   ./run.sh
+   ```
+
+## 📦 Building a Desktop App (.deb)
+
+To package the studio into a standalone `.deb` installer for Zorin OS:
+
+```bash
+./build.sh
+```
+
+The compiled package will be available in the `dist` directory.
+
+## 🤖 How to use Auto Mode
+
+1. Open the studio.
+2. Click the **Auto Mode** button in the top right.
+3. Type your request (e.g., "Build a snake game").
+4. Watch the autonomous agents plan, write code, debug, and deploy your app instantly in the Live Preview!
