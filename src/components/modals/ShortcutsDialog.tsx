@@ -23,9 +23,9 @@ function groups(): ShortcutGroup[] {
         [`${mod} + S`, 'Save active file'],
         [`${mod} + ${shift} + S`, 'Save all open files'],
         [`${mod} + P`, 'Quick open file'],
-        [`${mod} + N`, 'New file (desktop menu)'],
-        [`${mod} + ${shift} + N`, 'New folder (desktop menu)'],
-        [`${mod} + W`, 'Close active editor (desktop menu)'],
+        [`${mod} + N`, 'New file (native menu)'],
+        [`${mod} + ${shift} + N`, 'New folder (native menu)'],
+        [`${mod} + W`, 'Close active editor (native menu)'],
       ],
     },
     {

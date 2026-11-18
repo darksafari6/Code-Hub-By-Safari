@@ -95,7 +95,7 @@ export function AssistantPanel({
             value={selectedModel ?? ''}
             onChange={(event) => onModelChange(event.target.value)}
             aria-label="AI model"
-            disabled={modelsLoading || models.length === 0 || !selectedProvider?.configured}
+            disabled={modelsLoading || !selectedProvider?.configured}
             title={
               models.length === 0
                 ? 'Using the provider default model'
@@ -106,6 +106,9 @@ export function AssistantPanel({
             <option value="">
               {modelsLoading ? 'Loading…' : `Default (${selectedProvider?.model ?? '—'})`}
             </option>
+            {selectedModel && !models.some((model) => model.id === selectedModel) && (
+              <option value={selectedModel}>{selectedModel}</option>
+            )}
             {models.map((model) => (
               <option key={model.id} value={model.id}>
                 {model.label}

@@ -13,9 +13,6 @@ export interface HotkeyHandlers {
   onGit: () => void;
   onExplorer: () => void;
   onToggleAssistant: () => void;
-  onCloseEditor: () => void;
-  onNewFile: () => void;
-  onNewFolder: () => void;
 }
 
 export function useHotkeys(handlers: HotkeyHandlers): void {
@@ -109,20 +106,6 @@ export function useHotkeys(handlers: HotkeyHandlers): void {
       if (key === 'a' && alt) {
         run(handlersRef.current.onToggleAssistant);
         return;
-      }
-
-      if (key === 'w' && !shift) {
-        run(handlersRef.current.onCloseEditor);
-        return;
-      }
-
-      if (key === 'n' && shift) {
-        run(handlersRef.current.onNewFolder);
-        return;
-      }
-
-      if (key === 'n' && !shift) {
-        run(handlersRef.current.onNewFile);
       }
     };
 

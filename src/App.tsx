@@ -272,11 +272,6 @@ export default function App() {
     onGit: () => openSidebar('git'),
     onExplorer: () => openSidebar('explorer'),
     onToggleAssistant: toggleAssistant,
-    onCloseEditor: () => {
-      if (workspace.activePath) workspace.closeFile(workspace.activePath);
-    },
-    onNewFile: () => setNewEntry('file'),
-    onNewFolder: () => setNewEntry('directory'),
   });
 
   useEffect(() => {
