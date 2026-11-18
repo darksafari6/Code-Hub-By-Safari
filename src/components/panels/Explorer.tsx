@@ -1,7 +1,8 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import {
   ChevronRight,
   ChevronsDownUp,
+  Copy,
   FileCode2,
   FilePlus2,
   FileText,
@@ -11,6 +12,7 @@ import {
   Pencil,
   RefreshCw,
   Trash2,
+  Upload,
 } from 'lucide-react';
 import type { TreeNode } from '../../lib/types';
 import { basename, cn } from '../../lib/utils';
@@ -28,6 +30,8 @@ interface ExplorerProps {
   onCreate: (path: string, type: 'file' | 'directory') => void;
   onRename: (from: string, to: string) => void;
   onDelete: (path: string) => void;
+  onDuplicate: (path: string) => void;
+  onUpload: (files: File[], directory?: string) => void;
   onRefresh: () => void;
 }
 
@@ -57,11 +61,20 @@ export function Explorer({
   onCreate,
   onRename,
   onDelete,
+  onDuplicate,
+  onUpload,
   onRefresh,
 }: ExplorerProps) {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [dialog, setDialog] = useState<DialogState>(null);
   const [menu, setMenu] = useState<{ x: number; y: number; node: TreeNode | null } | null>(null);
+  const [uploadTarget, setUploadTarget] = useState<string>('');
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  const pickFiles = (directory: string) => {
+    setUploadTarget(directory);
+    fileInputRef.current?.click();
+  };
 
   const dirtySet = useMemo(() => new Set(dirtyPaths), [dirtyPaths]);
 
@@ -86,6 +99,7 @@ export function Explorer({
       return [
         { label: 'New file', icon: <FilePlus2 size={13} />, onSelect: () => openCreateDialog('', 'file') },
         { label: 'New folder', icon: <FolderPlus size={13} />, onSelect: () => openCreateDialog('', 'directory') },
+        { label: 'Upload files…', icon: <Upload size={13} />, onSelect: () => pickFiles('') },
         { label: 'Refresh', icon: <RefreshCw size={13} />, onSelect: onRefresh },
       ];
     }
@@ -93,15 +107,23 @@ export function Explorer({
     const items: ContextMenuItem[] = [];
 
     if (node.type === 'file') {
-      items.push({
-        label: 'Open',
-        icon: <FileText size={13} />,
-        onSelect: () => onOpen(node.path),
-      });
+      items.push(
+        {
+          label: 'Open',
+          icon: <FileText size={13} />,
+          onSelect: () => onOpen(node.path),
+        },
+        {
+          label: 'Duplicate',
+          icon: <Copy size={13} />,
+          onSelect: () => onDuplicate(node.path),
+        },
+      );
     } else {
       items.push(
         { label: 'New file', icon: <FilePlus2 size={13} />, onSelect: () => openCreateDialog(node.path, 'file') },
         { label: 'New folder', icon: <FolderPlus size={13} />, onSelect: () => openCreateDialog(node.path, 'directory') },
+        { label: 'Upload files…', icon: <Upload size={13} />, onSelect: () => pickFiles(node.path) },
       );
     }
 
@@ -206,6 +228,9 @@ export function Explorer({
         <IconButton label="New folder" size="sm" onClick={() => openCreateDialog('', 'directory')}>
           <FolderPlus size={14} />
         </IconButton>
+        <IconButton label="Upload files" size="sm" onClick={() => pickFiles('')}>
+          <Upload size={14} />
+        </IconButton>
         <IconButton label="Refresh" size="sm" onClick={onRefresh}>
           <RefreshCw size={13} />
         </IconButton>
@@ -252,6 +277,18 @@ export function Explorer({
           renderNodes(tree, 0)
         )}
       </div>
+
+      <input
+        ref={fileInputRef}
+        type="file"
+        multiple
+        className="hidden"
+        onChange={(event) => {
+          const files = Array.from(event.target.files ?? []);
+          event.target.value = '';
+          if (files.length > 0) onUpload(files, uploadTarget);
+        }}
+      />
 
       {menu && (
         <ContextMenu

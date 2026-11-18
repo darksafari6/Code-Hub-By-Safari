@@ -4,6 +4,18 @@ import 'dotenv/config';
 
 const ROOT = process.cwd();
 
+/** Version shown in the UI, taken from package.json so it can never drift. */
+const VERSION = (() => {
+  try {
+    const manifest = JSON.parse(
+      fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'),
+    ) as { version?: string };
+    return manifest.version ?? '0.0.0';
+  } catch {
+    return '0.0.0';
+  }
+})();
+
 function env(name: string): string | null {
   const value = process.env[name];
   if (typeof value !== 'string') return null;
@@ -28,7 +40,7 @@ export const config = {
   port: envNumber('PORT', 3000),
   workspaceDir,
   accessToken: env('SAFARI_ACCESS_TOKEN'),
-  version: '2.0.0',
+  version: VERSION,
   limits: {
     maxFileBytes: 2 * 1024 * 1024,
     maxTreeEntries: 5000,
@@ -37,7 +49,8 @@ export const config = {
     maxSearchFileBytes: 1024 * 1024,
     maxCommandOutputBytes: 1024 * 1024,
     maxCommandRuntimeMs: 10 * 60 * 1000,
-    maxJsonBody: '5mb',
+    maxJsonBody: '12mb',
+    maxUploadBytes: 8 * 1024 * 1024,
   },
   ai: {
     gemini: {

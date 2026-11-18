@@ -65,6 +65,8 @@ status code.
 | POST | `/api/files/create` | `{ path, type }` | `TreeNode` |
 | POST | `/api/files/rename` | `{ from, to }` | `TreeNode` |
 | POST | `/api/files/delete` | `{ path }` | `{ path }` |
+| POST | `/api/files/duplicate` | `{ path, to? }` | `TreeNode` (picks `name copy.ext`) |
+| PUT | `/api/files/upload` | `{ path, base64 }` | `{ path, size }` (8 MB cap) |
 | GET | `/api/files/search` | `?q=&caseSensitive=&path=` | `{ query, matches, truncated }` |
 
 ### Git
@@ -74,6 +76,10 @@ status code.
 | GET | `/api/git/status` | — | `GitStatus` |
 | GET | `/api/git/log` | — | `{ commits }` |
 | GET | `/api/git/branches` | — | `{ branches, current }` |
+| GET | `/api/git/diff` | `?path=` | `{ path, oldContent, newContent, binary, truncated }` |
+| POST | `/api/git/branch` | `{ name, checkout? }` | `{ branches, current }` |
+| POST | `/api/git/checkout` | `{ name }` | `{ branches, current }` |
+| POST | `/api/git/discard` | `{ paths }` | `GitStatus` |
 | POST | `/api/git/init` | — | `GitStatus` |
 | POST | `/api/git/clone` | `{ url, token?, replace? }` | `GitStatus` |
 | POST | `/api/git/stage` | `{ all }` or `{ paths }` | `GitStatus` |
@@ -87,6 +93,7 @@ status code.
 | Method | Path | Body | Result |
 | --- | --- | --- | --- |
 | GET | `/api/ai/providers` | — | `{ providers }` with `configured` flags |
+| GET | `/api/ai/models` | `?provider=` | `{ provider, models: [{ id, label }] }` |
 | POST | `/api/ai/chat` | `{ provider, messages, system?, temperature?, maxTokens? }` | event stream |
 
 The chat response is `text/event-stream`, one JSON object per `data:` line:
@@ -106,7 +113,7 @@ inline. Requests are rate limited per IP (40/minute).
 | --- | --- | --- |
 | GET | `/api/health` | `{ status, version, uptimeSeconds }` (no auth) |
 | GET | `/api/system/stats` | CPU count, load average, memory, uptime |
-| GET | `/api/system/info` | version, workspace, git/auth flags, provider status |
+| GET | `/api/system/info` | version, workspace path, platform/arch/Node, git/auth flags, provider status |
 
 ## Terminal protocol
 
@@ -157,8 +164,24 @@ The pure logic that is easy to get wrong is extracted and unit tested:
 - `server/lib/safe-path.ts` — traversal and symlink escapes;
 - `server/lib/git-status.ts` — the `statusMatrix` mapping table;
 - `server/lib/terminal.ts` — command tokenisation and cwd resolution;
-- `src/lib/markdown.ts` — assistant message rendering.
+- `server/lib/git.ts` — branch-name validation (rejects `..`, leading `-`, `.lock`);
+- `src/lib/markdown.ts` — assistant message rendering;
+- `src/lib/diff.ts` — the LCS line diff behind the diff viewer.
 
 `npm run typecheck` runs TypeScript in `strict` mode across client and server;
 CI runs typecheck, tests, build and an HTTP smoke test (including a traversal
 attempt that must fail).
+
+## Desktop bridge
+
+`electron/main.cjs` builds a native `Menu` whose items never contain their own
+logic: each one sends the id of the matching in-app command over
+`webContents.send('safari:menu', id)`. `electron/preload.cjs` exposes that stream
+as `window.safariDesktop.onMenuCommand(cb)` inside a sandboxed, context-isolated
+renderer. `src/App.tsx` builds `menus: MenuDef[]` once per render and stores an
+id → action map in a ref, so the native menu and the in-app menu bar execute the
+same functions without duplicating code.
+
+The packaged app spawns `dist-server/index.js` with the user's workspace
+directory and waits for `/api/health` before loading the UI. If the bundle is
+missing it fails loudly instead of showing an empty window.

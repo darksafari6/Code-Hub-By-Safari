@@ -34,9 +34,14 @@ export interface UseWorkspaceResult {
   updateContent: (path: string, content: string) => void;
   saveFile: (path: string) => Promise<void>;
   saveActive: () => Promise<void>;
+  saveAll: () => Promise<void>;
+  closeAll: () => void;
+  reloadFile: (path: string) => Promise<void>;
   createEntry: (path: string, type: 'file' | 'directory') => Promise<void>;
   renameEntry: (from: string, to: string) => Promise<void>;
   deleteEntry: (path: string) => Promise<void>;
+  duplicateEntry: (path: string) => Promise<void>;
+  uploadFiles: (files: File[], directory?: string) => Promise<void>;
 }
 
 export function useWorkspace(options: { autoSave: boolean }): UseWorkspaceResult {
@@ -212,6 +217,44 @@ export function useWorkspace(options: { autoSave: boolean }): UseWorkspaceResult
     if (activePath) await saveFile(activePath);
   }, [activePath, saveFile]);
 
+  const saveAll = useCallback(async () => {
+    const dirty = Object.entries(buffersRef.current)
+      .filter(([, buffer]) => buffer.content !== buffer.original)
+      .map(([path]) => path);
+
+    if (dirty.length === 0) {
+      toast.info('Nothing to save');
+      return;
+    }
+    for (const path of dirty) {
+      await saveFile(path);
+    }
+  }, [saveFile]);
+
+  const closeAll = useCallback(() => {
+    Object.values(timersRef.current).forEach(clearTimeout);
+    timersRef.current = {};
+    setOpenPaths([]);
+    setActivePath(null);
+    setBuffers({});
+  }, []);
+
+  const reloadFile = useCallback(
+    async (path: string) => {
+      if (!openPathsRef.current.includes(path)) return;
+      try {
+        const file = await api.files.read(path);
+        setBuffers((previous) => ({
+          ...previous,
+          [path]: { content: file.content, original: file.content },
+        }));
+      } catch {
+        closeFile(path);
+      }
+    },
+    [closeFile],
+  );
+
   const createEntry = useCallback(
     async (path: string, type: 'file' | 'directory') => {
       try {
@@ -278,6 +321,43 @@ export function useWorkspace(options: { autoSave: boolean }): UseWorkspaceResult
     [refreshTree],
   );
 
+  const duplicateEntry = useCallback(
+    async (path: string) => {
+      try {
+        const created = await api.files.duplicate(path);
+        await refreshTree();
+        toast.success(`Created ${basename(created.path)}`);
+      } catch (error) {
+        toast.error(`Could not duplicate: ${(error as Error).message}`);
+      }
+    },
+    [refreshTree],
+  );
+
+  const uploadFiles = useCallback(
+    async (files: File[], directory = '') => {
+      if (files.length === 0) return;
+
+      for (const file of files) {
+        try {
+          const buffer = await file.arrayBuffer();
+          if (buffer.byteLength > 8 * 1024 * 1024) {
+            toast.error(`${file.name} is larger than the 8 MB upload limit`);
+            continue;
+          }
+          const path = directory ? `${directory}/${file.name}` : file.name;
+          await api.files.upload(path, toBase64(buffer));
+          toast.success(`Uploaded ${file.name}`);
+        } catch (error) {
+          toast.error(`Could not upload ${file.name}: ${(error as Error).message}`);
+        }
+      }
+
+      await refreshTree();
+    },
+    [refreshTree],
+  );
+
   const activeContent = activePath ? buffers[activePath]?.content ?? '' : '';
 
   return {
@@ -298,8 +378,24 @@ export function useWorkspace(options: { autoSave: boolean }): UseWorkspaceResult
     updateContent,
     saveFile,
     saveActive,
+    saveAll,
+    closeAll,
+    reloadFile,
     createEntry,
     renameEntry,
     deleteEntry,
+    duplicateEntry,
+    uploadFiles,
   };
+}
+
+/** Convert an ArrayBuffer to base64 without blowing the call stack. */
+function toBase64(buffer: ArrayBuffer): string {
+  const bytes = new Uint8Array(buffer);
+  const chunkSize = 0x8000;
+  let binary = '';
+  for (let index = 0; index < bytes.length; index += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(index, index + chunkSize));
+  }
+  return btoa(binary);
 }

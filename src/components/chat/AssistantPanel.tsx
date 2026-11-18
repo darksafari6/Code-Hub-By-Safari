@@ -9,7 +9,7 @@ import {
   Square,
 } from 'lucide-react';
 import type { ChatContext, UseChatResult } from '../../hooks/useChat';
-import type { ProviderId, ProviderInfo } from '../../lib/types';
+import type { ModelInfo, ProviderId, ProviderInfo } from '../../lib/types';
 import { basename, cn } from '../../lib/utils';
 import { Button } from '../ui/Button';
 import { IconButton } from '../ui/IconButton';
@@ -20,6 +20,11 @@ interface AssistantPanelProps {
   providers: ProviderInfo[];
   activePath: string | null;
   context: ChatContext;
+  models: ModelInfo[];
+  modelsLoading: boolean;
+  selectedModel: string | undefined;
+  onModelChange: (model: string) => void;
+  onInsertCode: (code: string) => void;
   onOpenSettings: () => void;
 }
 
@@ -28,6 +33,11 @@ export function AssistantPanel({
   providers,
   activePath,
   context,
+  models,
+  modelsLoading,
+  selectedModel,
+  onModelChange,
+  onInsertCode,
   onOpenSettings,
 }: AssistantPanelProps) {
   const [input, setInput] = useState('');
@@ -56,6 +66,7 @@ export function AssistantPanel({
         { label: 'Explain this file', prompt: `Explain what ${basename(activePath)} does, focusing on the important parts.` },
         { label: 'Find bugs', prompt: `Review ${basename(activePath)} for bugs, edge cases and security issues. Be specific.` },
         { label: 'Add tests', prompt: `Write tests for ${basename(activePath)} following the project's conventions.` },
+        { label: 'Refactor for clarity', prompt: `Refactor ${basename(activePath)} for clarity and readability without changing behaviour. Return the full updated file in one code block.` },
       ]
     : [];
 
@@ -77,6 +88,27 @@ export function AssistantPanel({
               <option key={provider.id} value={provider.id}>
                 {provider.label}
                 {provider.configured ? '' : ' (not configured)'}
+              </option>
+            ))}
+          </select>
+          <select
+            value={selectedModel ?? ''}
+            onChange={(event) => onModelChange(event.target.value)}
+            aria-label="AI model"
+            disabled={modelsLoading || models.length === 0 || !selectedProvider?.configured}
+            title={
+              models.length === 0
+                ? 'Using the provider default model'
+                : 'Choose the model for this provider'
+            }
+            className="h-6 max-w-[130px] rounded border border-line bg-app px-1.5 text-[11px] text-muted outline-none focus:border-accent disabled:opacity-60"
+          >
+            <option value="">
+              {modelsLoading ? 'Loading…' : `Default (${selectedProvider?.model ?? '—'})`}
+            </option>
+            {models.map((model) => (
+              <option key={model.id} value={model.id}>
+                {model.label}
               </option>
             ))}
           </select>
@@ -170,7 +202,7 @@ export function AssistantPanel({
                   {message.content}
                 </p>
               ) : message.content ? (
-                <MessageContent content={message.content} />
+                <MessageContent content={message.content} onInsertCode={onInsertCode} />
               ) : (
                 <div className="flex gap-1 py-1">
                   <Dot delay="0ms" />
@@ -188,6 +220,11 @@ export function AssistantPanel({
           <div className="mb-1.5 flex items-center gap-1 text-[10.5px] text-faint">
             <span className="rounded bg-elevated px-1.5 py-0.5">context</span>
             <span className="truncate">{activePath}</span>
+            {context.selection && (
+              <span className="shrink-0 rounded bg-accent-soft px-1.5 py-0.5 text-accent">
+                selection
+              </span>
+            )}
           </div>
         )}
         <div className="relative">

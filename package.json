@@ -1,9 +1,9 @@
 {
   "name": "safari-ai-dev-studio",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "private": true,
   "type": "module",
-  "description": "A local-first AI development workspace: editor, terminal, git and AI assistant in one browser UI.",
+  "description": "An open-source, AI-assisted development environment for Linux desktops.",
   "license": "MIT",
   "main": "electron/main.cjs",
   "engines": {

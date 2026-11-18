@@ -10,16 +10,22 @@ import {
   Minus,
   Plus,
   RefreshCw,
+  Undo2,
 } from 'lucide-react';
-import type { UseGitResult } from '../../hooks/useGit';
+import type { GitIdentity, UseGitResult } from '../../hooks/useGit';
 import type { GitFileEntry } from '../../lib/types';
 import { cn, formatRelativeTime } from '../../lib/utils';
 import { Button } from '../ui/Button';
 import { IconButton } from '../ui/IconButton';
+import { PromptDialog } from '../ui/PromptDialog';
 
 interface GitPanelProps {
   git: UseGitResult;
+  identity: GitIdentity;
+  openDiffPath: string | null;
   onOpenFile: (path: string) => void;
+  onOpenDiff: (path: string) => void;
+  onDiscard: (paths: string[]) => void;
 }
 
 function statusStyle(entry: GitFileEntry): string {
@@ -48,7 +54,14 @@ function statusLetter(entry: GitFileEntry): string {
   }
 }
 
-export function GitPanel({ git, onOpenFile }: GitPanelProps) {
+export function GitPanel({
+  git,
+  identity,
+  openDiffPath,
+  onOpenFile,
+  onOpenDiff,
+  onDiscard,
+}: GitPanelProps) {
   const [message, setMessage] = useState('');
   const [stageAll, setStageAll] = useState(true);
   const [cloneUrl, setCloneUrl] = useState('');
@@ -57,8 +70,9 @@ export function GitPanel({ git, onOpenFile }: GitPanelProps) {
   const [pushToken, setPushToken] = useState('');
   const [showPush, setShowPush] = useState(false);
   const [showClone, setShowClone] = useState(false);
+  const [branchDialog, setBranchDialog] = useState(false);
 
-  const { status, commits, busy } = git;
+  const { status, commits, branches, busy } = git;
   const staged = status.files.filter((entry) => entry.staged);
   const unstaged = status.files.filter((entry) => !entry.staged);
 
@@ -87,7 +101,11 @@ export function GitPanel({ git, onOpenFile }: GitPanelProps) {
                 disabled={busy !== null}
                 onClick={() => void git.init()}
               >
-                {busy === 'init' ? <Loader2 size={13} className="animate-spin" /> : <GitCommitHorizontal size={13} />}
+                {busy === 'init' ? (
+                  <Loader2 size={13} className="animate-spin" />
+                ) : (
+                  <GitCommitHorizontal size={13} />
+                )}
                 Initialise
               </Button>
               <Button size="sm" onClick={() => setShowClone((value) => !value)}>
@@ -133,7 +151,11 @@ export function GitPanel({ git, onOpenFile }: GitPanelProps) {
                 className="w-full"
                 disabled={!cloneUrl.trim() || busy !== null}
                 onClick={async () => {
-                  const ok = await git.clone(cloneUrl.trim(), cloneToken || undefined, replaceWorkspace);
+                  const ok = await git.clone(
+                    cloneUrl.trim(),
+                    cloneToken || undefined,
+                    replaceWorkspace,
+                  );
                   if (ok) {
                     setCloneUrl('');
                     setCloneToken('');
@@ -161,22 +183,51 @@ export function GitPanel({ git, onOpenFile }: GitPanelProps) {
           Source control
         </span>
         <span className="ml-auto" />
+        <IconButton label="Stage all changes" size="sm" onClick={() => void git.stageAll()}>
+          <Plus size={13} />
+        </IconButton>
         <IconButton label="Refresh" size="sm" onClick={() => void git.refresh()}>
           <RefreshCw size={13} />
         </IconButton>
       </div>
 
       <div className="scrollbar-thin flex-1 space-y-4 overflow-y-auto p-2.5">
-        <div className="space-y-1 rounded-lg border border-line bg-elevated/40 p-2.5">
+        <div className="space-y-1.5 rounded-lg border border-line bg-elevated/40 p-2.5">
           <div className="flex items-center gap-1.5 text-[12px] text-ink">
             <GitBranch size={13} className="text-accent" />
-            <span className="font-medium">{status.branch ?? 'detached HEAD'}</span>
+            <select
+              aria-label="Current branch"
+              value={branches.current ?? ''}
+              disabled={busy !== null || branches.branches.length === 0}
+              onChange={(event) => {
+                const name = event.target.value;
+                if (name && name !== branches.current) void git.checkout(name);
+              }}
+              className="min-w-0 flex-1 cursor-pointer rounded border border-transparent bg-transparent px-0.5 py-0.5 text-[12px] font-medium text-ink outline-none hover:border-line focus:border-accent"
+            >
+              {branches.current === null && <option value="">detached HEAD</option>}
+              {branches.branches.map((branch) => (
+                <option key={branch} value={branch} className="bg-elevated text-ink">
+                  {branch}
+                </option>
+              ))}
+            </select>
+            <IconButton
+              label="Create branch"
+              size="sm"
+              disabled={!status.hasCommits || busy !== null}
+              onClick={() => setBranchDialog(true)}
+            >
+              <Plus size={13} />
+            </IconButton>
           </div>
           <p className="truncate text-[11px] text-faint" title={status.remote ?? undefined}>
             {status.remote ?? 'No remote configured'}
           </p>
           {!status.hasCommits && (
-            <p className="text-[11px] text-warning">No commits yet — make your first commit below.</p>
+            <p className="text-[11px] text-warning">
+              No commits yet — make your first commit below.
+            </p>
           )}
         </div>
 
@@ -204,11 +255,15 @@ export function GitPanel({ git, onOpenFile }: GitPanelProps) {
               className="flex-1"
               disabled={!message.trim() || busy !== null}
               onClick={async () => {
-                const ok = await git.commit(message, stageAll);
+                const ok = await git.commit(message, stageAll, identity);
                 if (ok) setMessage('');
               }}
             >
-              {busy === 'commit' ? <Loader2 size={13} className="animate-spin" /> : <GitCommitHorizontal size={13} />}
+              {busy === 'commit' ? (
+                <Loader2 size={13} className="animate-spin" />
+              ) : (
+                <GitCommitHorizontal size={13} />
+              )}
               Commit
             </Button>
             <Button
@@ -255,6 +310,9 @@ export function GitPanel({ git, onOpenFile }: GitPanelProps) {
           title="Staged"
           entries={staged}
           emptyLabel="Nothing staged"
+          openDiffPath={openDiffPath}
+          onOpenDiff={onOpenDiff}
+          onOpen={onOpenFile}
           action={(entry) => (
             <IconButton
               label="Unstage"
@@ -267,26 +325,39 @@ export function GitPanel({ git, onOpenFile }: GitPanelProps) {
               <Minus size={12} />
             </IconButton>
           )}
-          onOpen={onOpenFile}
         />
 
         <ChangeGroup
           title="Changes"
           entries={unstaged}
           emptyLabel="Working tree clean"
-          action={(entry) => (
-            <IconButton
-              label="Stage"
-              size="sm"
-              onClick={(event) => {
-                event.stopPropagation();
-                void git.stage([entry.path]);
-              }}
-            >
-              <Plus size={12} />
-            </IconButton>
-          )}
+          openDiffPath={openDiffPath}
+          onOpenDiff={onOpenDiff}
           onOpen={onOpenFile}
+          action={(entry) => (
+            <>
+              <IconButton
+                label="Discard changes"
+                size="sm"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onDiscard([entry.path]);
+                }}
+              >
+                <Undo2 size={12} />
+              </IconButton>
+              <IconButton
+                label="Stage"
+                size="sm"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  void git.stage([entry.path]);
+                }}
+              >
+                <Plus size={12} />
+              </IconButton>
+            </>
+          )}
         />
 
         <div>
@@ -313,6 +384,20 @@ export function GitPanel({ git, onOpenFile }: GitPanelProps) {
           )}
         </div>
       </div>
+
+      <PromptDialog
+        open={branchDialog}
+        title="Create branch"
+        description="A new branch is created from the current HEAD and checked out."
+        label="Branch name"
+        placeholder="feature/my-change"
+        confirmLabel="Create and switch"
+        onCancel={() => setBranchDialog(false)}
+        onConfirm={async (name) => {
+          setBranchDialog(false);
+          await git.createBranch(name);
+        }}
+      />
     </div>
   );
 }
@@ -321,11 +406,21 @@ interface ChangeGroupProps {
   title: string;
   entries: GitFileEntry[];
   emptyLabel: string;
+  openDiffPath: string | null;
   action: (entry: GitFileEntry) => React.ReactNode;
   onOpen: (path: string) => void;
+  onOpenDiff: (path: string) => void;
 }
 
-function ChangeGroup({ title, entries, emptyLabel, action, onOpen }: ChangeGroupProps) {
+function ChangeGroup({
+  title,
+  entries,
+  emptyLabel,
+  openDiffPath,
+  action,
+  onOpen,
+  onOpenDiff,
+}: ChangeGroupProps) {
   const [open, setOpen] = useState(true);
 
   return (
@@ -350,16 +445,33 @@ function ChangeGroup({ title, entries, emptyLabel, action, onOpen }: ChangeGroup
             {entries.map((entry) => (
               <li key={entry.path}>
                 <div
-                  onClick={() => onOpen(entry.path)}
-                  className="group flex cursor-pointer items-center gap-1.5 rounded px-1.5 py-1 hover:bg-hover"
+                  onClick={() => onOpenDiff(entry.path)}
+                  className={cn(
+                    'group flex cursor-pointer items-center gap-1.5 rounded px-1.5 py-1',
+                    openDiffPath === entry.path ? 'bg-hover' : 'hover:bg-hover',
+                  )}
+                  title={`View diff for ${entry.path}`}
                 >
                   <span className={cn('w-2.5 text-[11px] font-bold', statusStyle(entry))}>
                     {statusLetter(entry)}
                   </span>
-                  <span className="truncate text-[11.5px] text-muted group-hover:text-ink" title={entry.path}>
+                  <span
+                    className="truncate text-[11.5px] text-muted group-hover:text-ink"
+                    title={entry.path}
+                  >
                     {entry.path}
                   </span>
-                  <span className="ml-auto opacity-0 transition-opacity group-hover:opacity-100">
+                  <span className="ml-auto flex items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
+                    <IconButton
+                      label="Open file"
+                      size="sm"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        onOpen(entry.path);
+                      }}
+                    >
+                      <ChevronRight size={12} />
+                    </IconButton>
                     {action(entry)}
                   </span>
                 </div>

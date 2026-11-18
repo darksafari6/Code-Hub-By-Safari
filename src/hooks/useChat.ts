@@ -44,11 +44,20 @@ export interface UseChatResult {
   clear: () => void;
 }
 
-export function useChat(defaultProvider: ProviderId): UseChatResult {
+export interface UseChatOptions {
+  provider: ProviderId;
+  /** Per-provider model overrides from settings. */
+  models?: Partial<Record<ProviderId, string>>;
+}
+
+export function useChat(options: UseChatOptions): UseChatResult {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [streaming, setStreaming] = useState(false);
-  const [provider, setProvider] = useState<ProviderId>(defaultProvider);
+  const [provider, setProvider] = useState<ProviderId>(options.provider);
   const abortRef = useRef<AbortController | null>(null);
+
+  const modelsRef = useRef(options.models);
+  modelsRef.current = options.models;
 
   const stop = useCallback(() => {
     abortRef.current?.abort();
@@ -93,10 +102,13 @@ export function useChat(defaultProvider: ProviderId): UseChatResult {
       };
 
       try {
+        const model = modelsRef.current?.[provider];
+
         await streamAssistantReply(
           {
             provider,
             messages: history,
+            ...(model ? { model } : {}),
             system: buildSystemPrompt(context),
             signal: controller.signal,
           },

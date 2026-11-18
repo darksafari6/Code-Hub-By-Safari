@@ -3,10 +3,12 @@ import { z } from 'zod';
 import {
   createEntry,
   deleteEntry,
+  duplicateEntry,
   listTree,
   readTextFile,
   renameEntry,
   searchWorkspace,
+  writeBinaryFile,
   writeTextFile,
 } from '../lib/files.js';
 import { parseBody, parseQuery, route } from '../lib/http.js';
@@ -91,5 +93,27 @@ filesRouter.get(
   route((req, res) => {
     const { q, caseSensitive, path } = parseQuery(searchSchema, req);
     res.json(searchWorkspace(q, { caseSensitive, path }));
+  }),
+);
+
+filesRouter.post(
+  '/duplicate',
+  route((req, res) => {
+    const { path, to } = parseBody(
+      z.object({ path: pathSchema, to: pathSchema.optional() }),
+      req,
+    );
+    res.status(201).json(duplicateEntry(path, to));
+  }),
+);
+
+filesRouter.put(
+  '/upload',
+  route((req, res) => {
+    const { path, base64 } = parseBody(
+      z.object({ path: pathSchema, base64: z.string().min(1) }),
+      req,
+    );
+    res.json(writeBinaryFile(path, base64));
   }),
 );

@@ -171,6 +171,25 @@ export async function createApp(options: CreateAppOptions = {}): Promise<express
   }
 
   app.use((error: unknown, _request: Request, response: Response, _next: NextFunction) => {
+    // body-parser reports oversized payloads with its own error type; turn that
+    // into a normal 413 instead of a 500 so the UI can explain the limit.
+    const bodyParserType = (error as { type?: string } | null)?.type;
+    if (bodyParserType === 'entity.too.large') {
+      if (!response.headersSent) {
+        response.status(413).json({
+          error: `Request body is too large. The limit is ${config.limits.maxJsonBody}.`,
+        });
+      }
+      return;
+    }
+
+    if (bodyParserType === 'entity.parse.failed') {
+      if (!response.headersSent) {
+        response.status(400).json({ error: 'Request body is not valid JSON' });
+      }
+      return;
+    }
+
     const status = error instanceof HttpError ? error.status : 500;
     const message =
       error instanceof Error ? error.message : 'Unexpected server error';

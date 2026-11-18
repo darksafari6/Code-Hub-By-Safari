@@ -2,12 +2,20 @@ import { useEffect, useRef } from 'react';
 
 export interface HotkeyHandlers {
   onSave: () => void;
+  onSaveAll: () => void;
   onCommandPalette: () => void;
   onToggleSidebar: () => void;
   onToggleTerminal: () => void;
   onTogglePreview: () => void;
   onOpenSettings: () => void;
   onQuickOpen: () => void;
+  onSearch: () => void;
+  onGit: () => void;
+  onExplorer: () => void;
+  onToggleAssistant: () => void;
+  onCloseEditor: () => void;
+  onNewFile: () => void;
+  onNewFolder: () => void;
 }
 
 export function useHotkeys(handlers: HotkeyHandlers): void {
@@ -17,63 +25,104 @@ export function useHotkeys(handlers: HotkeyHandlers): void {
   useEffect(() => {
     const listener = (event: KeyboardEvent) => {
       const modifier = event.ctrlKey || event.metaKey;
+      if (!modifier) return;
+
       const target = event.target as HTMLElement | null;
       const typingInField =
         target instanceof HTMLInputElement ||
         target instanceof HTMLTextAreaElement ||
         target?.isContentEditable === true;
 
-      if (modifier && !event.shiftKey && event.key.toLowerCase() === 's') {
+      const key = event.key.toLowerCase();
+      const shift = event.shiftKey;
+      const alt = event.altKey;
+      const run = (action: () => void) => {
         event.preventDefault();
-        handlersRef.current.onSave();
+        action();
+      };
+
+      if (key === 's' && !shift && !alt) {
+        run(handlersRef.current.onSave);
         return;
       }
 
-      if (modifier && event.key.toLowerCase() === 'k') {
-        event.preventDefault();
-        handlersRef.current.onCommandPalette();
+      if (key === 's' && shift) {
+        run(handlersRef.current.onSaveAll);
         return;
       }
 
-      if (modifier && event.shiftKey && event.key.toLowerCase() === 'p') {
-        event.preventDefault();
-        handlersRef.current.onCommandPalette();
+      if (key === 'k') {
+        run(handlersRef.current.onCommandPalette);
         return;
       }
 
-      if (modifier && !event.shiftKey && event.key.toLowerCase() === 'p') {
-        event.preventDefault();
-        handlersRef.current.onQuickOpen();
+      if (key === 'p' && shift) {
+        run(handlersRef.current.onCommandPalette);
         return;
       }
 
-      if (modifier && event.key.toLowerCase() === 'b') {
-        event.preventDefault();
-        handlersRef.current.onToggleSidebar();
+      if (key === 'p' && !shift) {
+        run(handlersRef.current.onQuickOpen);
         return;
       }
 
-      if (modifier && event.key.toLowerCase() === 'j') {
-        event.preventDefault();
-        handlersRef.current.onToggleTerminal();
+      if (key === 'f' && shift) {
+        run(handlersRef.current.onSearch);
         return;
       }
 
-      if (modifier && event.key === '`' && !typingInField) {
-        event.preventDefault();
-        handlersRef.current.onToggleTerminal();
+      if (key === 'g' && shift) {
+        run(handlersRef.current.onGit);
         return;
       }
 
-      if (modifier && event.key === ',') {
-        event.preventDefault();
-        handlersRef.current.onOpenSettings();
+      if (key === 'e' && shift) {
+        run(handlersRef.current.onExplorer);
         return;
       }
 
-      if (modifier && event.shiftKey && event.key.toLowerCase() === 'v') {
-        event.preventDefault();
-        handlersRef.current.onTogglePreview();
+      if (key === 'b' && !shift) {
+        run(handlersRef.current.onToggleSidebar);
+        return;
+      }
+
+      if (key === 'j' && !shift) {
+        run(handlersRef.current.onToggleTerminal);
+        return;
+      }
+
+      if (key === '`' && !typingInField) {
+        run(handlersRef.current.onToggleTerminal);
+        return;
+      }
+
+      if (key === ',' && !shift) {
+        run(handlersRef.current.onOpenSettings);
+        return;
+      }
+
+      if (key === 'v' && shift) {
+        run(handlersRef.current.onTogglePreview);
+        return;
+      }
+
+      if (key === 'a' && alt) {
+        run(handlersRef.current.onToggleAssistant);
+        return;
+      }
+
+      if (key === 'w' && !shift) {
+        run(handlersRef.current.onCloseEditor);
+        return;
+      }
+
+      if (key === 'n' && shift) {
+        run(handlersRef.current.onNewFolder);
+        return;
+      }
+
+      if (key === 'n' && !shift) {
+        run(handlersRef.current.onNewFile);
       }
     };
 

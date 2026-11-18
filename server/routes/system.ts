@@ -50,6 +50,10 @@ systemRouter.get(
     res.json({
       version: config.version,
       workspace: path.basename(config.workspaceDir),
+      workspacePath: config.workspaceDir,
+      platform: process.platform,
+      arch: process.arch,
+      nodeVersion: process.versions.node,
       workspaceEmpty,
       gitRepository: hasGitDirectory(),
       authEnabled: Boolean(config.accessToken),

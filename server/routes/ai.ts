@@ -3,6 +3,7 @@ import { z } from 'zod';
 import {
   createRateLimiter,
   isProviderId,
+  listModels,
   listProviders,
   streamChat,
 } from '../lib/ai.js';
@@ -20,6 +21,7 @@ const chatSchema = z.object({
     )
     .min(1)
     .max(60),
+  model: z.string().max(200).optional(),
   system: z.string().max(20_000).optional(),
   temperature: z.number().min(0).max(2).optional(),
   maxTokens: z.number().int().min(64).max(32_000).optional(),
@@ -67,5 +69,16 @@ aiRouter.post(
     } finally {
       res.end();
     }
+  }),
+);
+
+aiRouter.get(
+  '/models',
+  route(async (req, res) => {
+    const provider = req.query.provider;
+    if (!isProviderId(provider)) {
+      throw new HttpError(400, 'Unknown provider');
+    }
+    res.json({ provider, models: await listModels(provider) });
   }),
 );

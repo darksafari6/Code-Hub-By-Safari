@@ -321,3 +321,167 @@ export async function addRemote(url: string): Promise<void> {
   if (!/^https?:\/\/.+/i.test(url)) throw badRequest('Only http(s) URLs are supported');
   await git.addRemote({ fs, dir, remote: 'origin', url, force: true });
 }
+
+/* ---------------------------------------------------------------------------
+ * Branches
+ * ------------------------------------------------------------------------- */
+
+const BRANCH_PATTERN = /^(?!-)(?!.*\.\.)[A-Za-z0-9._/-]{1,120}$/;
+
+/** Reject names git itself would refuse, before touching the repository. */
+export function isValidBranchName(name: unknown): name is string {
+  if (typeof name !== 'string') return false;
+  if (!BRANCH_PATTERN.test(name)) return false;
+  if (name.startsWith('.') || name.endsWith('/') || name.endsWith('.lock')) return false;
+  return true;
+}
+
+export async function createBranch(
+  name: string,
+  checkout = true,
+): Promise<{ branches: string[]; current: string | null }> {
+  assertRepo();
+  if (!isValidBranchName(name)) {
+    throw badRequest('Invalid branch name. Use letters, numbers, ".", "_", "-" or "/".');
+  }
+
+  const existing = await git.listBranches({ fs, dir }).catch(() => [] as string[]);
+  if (existing.includes(name)) throw conflict(`Branch "${name}" already exists`);
+
+  const head = await headOid();
+  if (!head) throw badRequest('Create a commit before branching');
+
+  await git.branch({ fs, dir, ref: name, checkout });
+  return listBranches();
+}
+
+export async function checkoutBranch(name: string): Promise<{ branches: string[]; current: string | null }> {
+  assertRepo();
+  if (!isValidBranchName(name)) throw badRequest('Invalid branch name');
+
+  const branches = await git.listBranches({ fs, dir }).catch(() => [] as string[]);
+  if (!branches.includes(name)) throw notFound(`Branch "${name}" does not exist`);
+
+  try {
+    await git.checkout({ fs, dir, ref: name });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (/conflict|would be overwritten|local changes/i.test(message)) {
+      throw conflict(
+        `Cannot switch to "${name}": you have uncommitted changes that would be overwritten. Commit or discard them first.`,
+      );
+    }
+    throw error;
+  }
+
+  return listBranches();
+}
+
+/* ---------------------------------------------------------------------------
+ * Diff and discard
+ * ------------------------------------------------------------------------- */
+
+export interface FileDiff {
+  path: string;
+  oldContent: string;
+  newContent: string;
+  binary: boolean;
+  truncated: boolean;
+}
+
+const MAX_DIFF_BYTES = 400 * 1024;
+
+async function readHeadFile(filepath: string): Promise<string | null> {
+  const head = await headOid();
+  if (!head) return null;
+  try {
+    const { blob } = await git.readBlob({ fs, dir, oid: head, filepath });
+    return Buffer.from(blob).toString('utf8');
+  } catch {
+    // Not present in HEAD (new file).
+    return null;
+  }
+}
+
+function looksBinary(buffer: Buffer): boolean {
+  return buffer.subarray(0, 4096).includes(0);
+}
+
+/** HEAD content vs working tree content, for the diff viewer. */
+export async function getDiff(filepath: string): Promise<FileDiff> {
+  assertRepo();
+
+  const absolute = path.resolve(dir, filepath);
+  if (absolute !== dir && !absolute.startsWith(dir + path.sep)) {
+    throw badRequest('Path escapes the workspace');
+  }
+
+  let newContent = '';
+  let binary = false;
+  let truncated = false;
+
+  if (fs.existsSync(absolute) && fs.statSync(absolute).isFile()) {
+    const buffer = fs.readFileSync(absolute);
+    binary = looksBinary(buffer);
+    if (buffer.byteLength > MAX_DIFF_BYTES) {
+      truncated = true;
+      newContent = buffer.subarray(0, MAX_DIFF_BYTES).toString('utf8');
+    } else {
+      newContent = buffer.toString('utf8');
+    }
+  }
+
+  const oldRaw = await readHeadFile(filepath);
+  const oldContent = oldRaw ?? '';
+  if (oldRaw && Buffer.byteLength(oldRaw) > MAX_DIFF_BYTES) truncated = true;
+
+  return {
+    path: filepath,
+    oldContent: oldContent.slice(0, MAX_DIFF_BYTES),
+    newContent,
+    binary,
+    truncated,
+  };
+}
+
+/**
+ * Discard working-tree changes for the given paths. Tracked files are restored
+ * from HEAD; untracked files and folders are removed.
+ */
+export async function discardChanges(paths: string[]): Promise<GitStatus> {
+  assertRepo();
+
+  const matrix = (await git.statusMatrix({ fs, dir })) as StatusMatrixRow[];
+  const filePaths = new Set(
+    matrix
+      .map(mapStatusMatrixRow)
+      .filter((entry) => entry.status !== 'unmodified')
+      .map((entry) => entry.path),
+  );
+
+  for (const requested of paths) {
+    const absolute = path.resolve(dir, requested);
+    if (absolute !== dir && !absolute.startsWith(dir + path.sep)) {
+      throw badRequest('Path escapes the workspace');
+    }
+    if (requested === '.git' || requested.startsWith('.git/')) {
+      throw badRequest('The .git directory cannot be discarded through this API');
+    }
+
+    const tracked = matrix.find(
+      (row) => row[0] === requested && mapStatusMatrixRow(row).status !== 'untracked',
+    );
+
+    if (tracked) {
+      await git.checkout({ fs, dir, ref: 'HEAD', filepaths: [requested], force: true });
+      continue;
+    }
+
+    if (filePaths.has(requested) || fs.existsSync(absolute)) {
+      // Untracked: removing it is the only way to "discard".
+      fs.rmSync(absolute, { recursive: true, force: true });
+    }
+  }
+
+  return getStatus();
+}

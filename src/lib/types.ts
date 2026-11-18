@@ -28,6 +28,24 @@ export interface GitStatus {
   files: GitFileEntry[];
 }
 
+export interface GitBranchState {
+  branches: string[];
+  current: string | null;
+}
+
+export interface FileDiff {
+  path: string;
+  oldContent: string;
+  newContent: string;
+  binary: boolean;
+  truncated: boolean;
+}
+
+export interface ModelInfo {
+  id: string;
+  label: string;
+}
+
 export interface GitCommit {
   oid: string;
   shortOid: string;
@@ -51,6 +69,10 @@ export interface ProviderInfo {
 export interface SystemInfo {
   version: string;
   workspace: string;
+  workspacePath: string;
+  platform: string;
+  arch: string;
+  nodeVersion: string;
   workspaceEmpty: boolean;
   gitRepository: boolean;
   authEnabled: boolean;
@@ -115,6 +137,10 @@ export interface Settings {
   autoSave: boolean;
   provider: ProviderId;
   terminalFontSize: number;
+  /** Per-provider model override chosen in Settings; empty means "default". */
+  models: Partial<Record<ProviderId, string>>;
+  gitName: string;
+  gitEmail: string;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -126,4 +152,7 @@ export const DEFAULT_SETTINGS: Settings = {
   autoSave: false,
   provider: 'gemini',
   terminalFontSize: 13,
+  models: {},
+  gitName: '',
+  gitEmail: '',
 };

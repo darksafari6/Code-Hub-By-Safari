@@ -1,8 +1,10 @@
 # Safari AI Dev Studio
 
-A local-first AI development workspace that runs in your browser (or as a desktop
-app). It combines a code editor, file explorer, real terminal, git client and an
-AI assistant that can see the file you are working on.
+An open-source, local-first development environment for Linux desktops. It ships
+as an Electron application (`.AppImage` / `.deb`) and also runs in the browser. It
+combines a code editor, file explorer, real terminal, git client with diff and
+branch management, and an AI assistant that can see and edit the file you are
+working on.
 
 Everything runs on your machine: the web UI talks to a small Node server that
 owns the workspace folder. API keys never leave the server.
@@ -20,23 +22,31 @@ owns the workspace folder. API keys never leave the server.
 
 - **Editor** — Monaco with TypeScript/JSON/CSS/HTML IntelliSense, multi-tab
   editing, unsaved-change tracking, explicit save (`Ctrl/Cmd + S`) or auto-save.
-- **Explorer** — create, rename and delete files and folders, context menus,
-  ignored `node_modules`/`dist`/`.git` and friends.
+- **Explorer** — create, rename, duplicate, delete and upload files and folders,
+  context menus, ignored `node_modules`/`dist`/`.git` and friends.
 - **Search** — fast literal search across the workspace with per-file grouping
   and jump-to-line.
 - **Terminal** — a real shell session over WebSocket: streaming output, command
   history, `Ctrl+C` interrupt, working directory tracking, output limits.
 - **Source control** — initialise, clone (public or token), stage/unstage,
-  commit and push with isomorphic-git. No git binary required.
+  commit with a configurable author identity, create and switch branches, view a
+  line-by-line working-tree diff, discard changes, and push with isomorphic-git.
+  No git binary required.
 - **Assistant** — streaming chat with Google Gemini, DeepSeek or any
-  OpenAI-compatible endpoint. Sends the active file as context and renders code
-  blocks with a copy button.
+  OpenAI-compatible endpoint. Sends the active file and any editor selection as
+  context, discovers the models your key can reach, and lets you insert generated
+  code straight into the editor at the cursor. A right-click action asks about the
+  current selection; menu commands explain, review, test and refactor files.
 - **Preview** — serves the workspace statically at `/preview/` and reloads on
   save.
 - **Problems** — live diagnostics from Monaco's TypeScript/JSON/CSS/HTML
   services.
-- **Command palette** — `Ctrl/Cmd + K`, plus quick open and keyboard shortcuts.
-- **Desktop app** — optional Electron shell that starts the server for you.
+- **Menus** — File, Edit, Selection, View, Go, Terminal, AI and Help, in the app
+  bar and as a native Electron menu; every entry performs a real action.
+- **Command palette** — `Ctrl/Cmd + K`, plus quick open and a shortcut reference (`F1`).
+- **Desktop app** — Electron shell that starts the bundled server, with file
+  uploads, native menus, external links opened in your browser and a proper
+  Linux packaging pipeline.
 
 ## Quick start
 
@@ -127,6 +137,28 @@ Notes and limitations:
 - Push requires a personal access token; it is used for that request only and is
   not persisted.
 
+## Menus
+
+The same command set is available three ways: the menu bar (native inside
+Electron, in-app in the browser), the command palette, and keyboard shortcuts.
+
+| Menu | Highlights |
+| --- | --- |
+| **File** | New file/folder, open file, upload, save, save all, close/close others, download, settings |
+| **Edit** | Undo/redo, find, replace, toggle comment, format, duplicate/move line |
+| **Selection** | Select all, expand selection, multi-cursor, copy/cut/paste, ask assistant about selection, insert assistant code |
+| **View** | Explorer, search, source control, sidebar/panel/assistant/preview toggles, word wrap, minimap, themes, command palette |
+| **Go** | Go to file/line/symbol/definition, problems, working-tree diff |
+| **Terminal** | Toggle, restart session, clear, problems, open/reload preview |
+| **AI** | Focus assistant, explain selection, review file, generate tests, refactor file, choose model, clear conversation |
+| **Help** | Keyboard shortcuts, documentation, report an issue, about |
+
+Inside Electron the native menu sends stable ids over IPC to the renderer
+(`electron/preload.cjs` → `window.safariDesktop.onMenuCommand`), so menu clicks
+and the in-app actions share one implementation. Editor commands run through
+Monaco's own action registry, which is why undo, find/replace, formatting and
+multi-cursor behave exactly as they do in the editor.
+
 ## Desktop app
 
 ```bash
@@ -135,7 +167,8 @@ npm run dist:desktop        # -> release/*.AppImage, release/*.deb
 ```
 
 The packaged app starts the bundled server on port 3000 and stores its workspace
-in `~/Documents/SafariWorkspace` (override with `WORKSPACE_DIR`).
+in `~/Documents/SafariWorkspace` (override with `WORKSPACE_DIR`). Linux packages
+are produced with electron-builder (`AppImage` and `deb`, category Development).
 
 ## Architecture
 

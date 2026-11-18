@@ -335,3 +335,89 @@ export function resolvePreviewPath(urlPath: string): string | null {
     throw error;
   }
 }
+
+/**
+ * Copy a file to a new path. When no target is given a `name copy.ext` variant
+ * is picked, which is what the explorer's "Duplicate" action uses.
+ */
+export function duplicateEntry(relativePath: unknown, target?: unknown): TreeNode {
+  const sourceRelative = resolveRelativeForWrite(relativePath);
+  const sourceAbsolute = resolveInRoot(config.workspaceDir, sourceRelative);
+
+  const sourceStats = statSafe(sourceAbsolute);
+  if (!sourceStats) throw notFound(`"${sourceRelative}" does not exist`);
+  if (!sourceStats.isFile()) throw badRequest('Only files can be duplicated');
+  if (sourceStats.size > config.limits.maxFileBytes) {
+    throw tooLarge('File is too large to duplicate');
+  }
+
+  let targetRelative: string;
+  if (typeof target === 'string' && target.trim().length > 0) {
+    targetRelative = resolveRelativeForWrite(target);
+  } else {
+    const directory = path.dirname(sourceRelative);
+    const base = path.basename(sourceRelative);
+    const dot = base.lastIndexOf('.');
+    const stem = dot > 0 ? base.slice(0, dot) : base;
+    const extension = dot > 0 ? base.slice(dot) : '';
+
+    let attempt = 1;
+    let candidate: string;
+    do {
+      const suffix = attempt === 1 ? ' copy' : ` copy ${attempt}`;
+      candidate = `${directory === '.' ? '' : `${directory}/`}${stem}${suffix}${extension}`;
+      attempt += 1;
+    } while (fs.existsSync(resolveInRoot(config.workspaceDir, candidate)));
+
+    targetRelative = resolveRelativeForWrite(candidate);
+  }
+
+  const targetAbsolute = resolveInRoot(config.workspaceDir, targetRelative);
+  if (fs.existsSync(targetAbsolute)) throw conflict(`"${targetRelative}" already exists`);
+
+  fs.mkdirSync(path.dirname(targetAbsolute), { recursive: true });
+  fs.copyFileSync(sourceAbsolute, targetAbsolute);
+
+  return {
+    name: path.basename(targetAbsolute),
+    path: targetRelative,
+    type: 'file',
+    size: sourceStats.size,
+  };
+}
+
+/** Write an uploaded file. Content arrives base64 encoded so binaries survive. */
+export function writeBinaryFile(
+  relativePath: unknown,
+  base64: unknown,
+): { path: string; size: number } {
+  const relative = resolveRelativeForWrite(relativePath);
+  if (typeof base64 !== 'string') throw badRequest('`base64` must be a string');
+
+  const payload = base64.includes(',') && base64.startsWith('data:')
+    ? base64.slice(base64.indexOf(',') + 1)
+    : base64;
+
+  let buffer: Buffer;
+  try {
+    buffer = Buffer.from(payload, 'base64');
+  } catch {
+    throw badRequest('Invalid base64 payload');
+  }
+  if (buffer.byteLength === 0) throw badRequest('Uploaded file is empty');
+  if (buffer.byteLength > config.limits.maxUploadBytes) {
+    throw tooLarge(
+      `Upload is larger than the ${config.limits.maxUploadBytes / 1024 / 1024} MB limit`,
+    );
+  }
+
+  const absolute = resolveInRoot(config.workspaceDir, relative);
+  if (statSafe(absolute)?.isDirectory()) throw badRequest('That path is a directory');
+
+  fs.mkdirSync(path.dirname(absolute), { recursive: true });
+  const temporary = `${absolute}.${process.pid}.${Date.now()}.upload`;
+  fs.writeFileSync(temporary, buffer);
+  fs.renameSync(temporary, absolute);
+
+  return { path: relative, size: buffer.byteLength };
+}

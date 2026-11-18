@@ -2,8 +2,12 @@ import { Router } from 'express';
 import { z } from 'zod';
 import {
   addRemote,
+  checkoutBranch,
   cloneRepository,
   commit,
+  createBranch,
+  discardChanges,
+  getDiff,
   getLog,
   getStatus,
   initRepository,
@@ -12,7 +16,7 @@ import {
   stagePaths,
   unstagePaths,
 } from '../lib/git.js';
-import { parseBody, route } from '../lib/http.js';
+import { parseBody, parseQuery, route } from '../lib/http.js';
 
 const tokenSchema = z.string().min(1).max(500).optional();
 
@@ -127,5 +131,43 @@ gitRouter.post(
     const body = parseBody(z.object({ url: z.string().url().max(2000) }), req);
     await addRemote(body.url);
     res.json(await getStatus());
+  }),
+);
+
+gitRouter.post(
+  '/branch',
+  route(async (req, res) => {
+    const body = parseBody(
+      z.object({ name: z.string().min(1).max(120), checkout: z.boolean().optional() }),
+      req,
+    );
+    res.json(await createBranch(body.name, body.checkout ?? true));
+  }),
+);
+
+gitRouter.post(
+  '/checkout',
+  route(async (req, res) => {
+    const body = parseBody(z.object({ name: z.string().min(1).max(120) }), req);
+    res.json(await checkoutBranch(body.name));
+  }),
+);
+
+gitRouter.get(
+  '/diff',
+  route(async (req, res) => {
+    const { path } = parseQuery(z.object({ path: z.string().min(1).max(1024) }), req);
+    res.json(await getDiff(path));
+  }),
+);
+
+gitRouter.post(
+  '/discard',
+  route(async (req, res) => {
+    const body = parseBody(
+      z.object({ paths: z.array(z.string().min(1).max(1024)).min(1).max(500) }),
+      req,
+    );
+    res.json(await discardChanges(body.paths));
   }),
 );

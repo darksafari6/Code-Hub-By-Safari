@@ -1,8 +1,11 @@
 import type {
   ChatMessage,
   FileContent,
+  FileDiff,
+  GitBranchState,
   GitCommit,
   GitStatus,
+  ModelInfo,
   ProviderId,
   ProviderInfo,
   SearchResult,
@@ -104,6 +107,16 @@ export const api = {
         method: 'POST',
         body: jsonBody({ path }),
       }),
+    duplicate: (path: string, to?: string) =>
+      request<TreeNode>('/api/files/duplicate', {
+        method: 'POST',
+        body: jsonBody({ path, ...(to ? { to } : {}) }),
+      }),
+    upload: (path: string, base64: string) =>
+      request<{ path: string; size: number }>('/api/files/upload', {
+        method: 'PUT',
+        body: jsonBody({ path, base64 }),
+      }),
     search: (query: string, caseSensitive = false) =>
       request<SearchResult>(
         `/api/files/search?q=${encodeURIComponent(query)}&caseSensitive=${caseSensitive}`,
@@ -130,10 +143,28 @@ export const api = {
         method: 'POST',
         body: jsonBody({ paths }),
       }),
-    commit: (message: string, stageAll: boolean) =>
+    commit: (message: string, stageAll: boolean, identity?: { name?: string; email?: string }) =>
       request<{ oid: string; status: GitStatus }>('/api/git/commit', {
         method: 'POST',
-        body: jsonBody({ message, stageAll }),
+        body: jsonBody({ message, stageAll, ...identity }),
+      }),
+    branches: () => request<GitBranchState>('/api/git/branches'),
+    createBranch: (name: string, checkout = true) =>
+      request<GitBranchState>('/api/git/branch', {
+        method: 'POST',
+        body: jsonBody({ name, checkout }),
+      }),
+    checkout: (name: string) =>
+      request<GitBranchState>('/api/git/checkout', {
+        method: 'POST',
+        body: jsonBody({ name }),
+      }),
+    diff: (path: string) =>
+      request<FileDiff>(`/api/git/diff?path=${encodeURIComponent(path)}`),
+    discard: (paths: string[]) =>
+      request<GitStatus>('/api/git/discard', {
+        method: 'POST',
+        body: jsonBody({ paths }),
       }),
     push: (token: string) =>
       request<{ ok: true }>('/api/git/push', {
@@ -145,6 +176,10 @@ export const api = {
   ai: {
     providers: () =>
       request<{ providers: ProviderInfo[] }>('/api/ai/providers').then((data) => data.providers),
+    models: (provider: ProviderId) =>
+      request<{ provider: ProviderId; models: ModelInfo[] }>(
+        `/api/ai/models?provider=${provider}`,
+      ).then((data) => data.models),
   },
 
   system: {
@@ -162,6 +197,7 @@ export interface StreamHandlers {
 export interface StreamChatOptions {
   provider: ProviderId;
   messages: ChatMessage[];
+  model?: string;
   system?: string;
   signal?: AbortSignal;
 }
@@ -186,6 +222,7 @@ export async function streamAssistantReply(
       signal: options.signal,
       body: JSON.stringify({
         provider: options.provider,
+        ...(options.model ? { model: options.model } : {}),
         messages: options.messages
           .filter((message) => message.status !== 'error')
           .map((message) => ({ role: message.role, content: message.content })),

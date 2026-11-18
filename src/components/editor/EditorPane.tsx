@@ -1,11 +1,37 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, type MutableRefObject } from 'react';
 import Editor, { type OnMount } from '@monaco-editor/react';
 import { ChevronRight, FileCode2, FileText, Loader2, X } from 'lucide-react';
 import type { RevealRequest } from '../../hooks/useWorkspace';
 import { languageForPath, languageLabel } from '../../lib/languages';
-import type { CursorPosition, Settings } from '../../lib/types';
+import type { CursorPosition, FileDiff, Settings } from '../../lib/types';
 import { basename, cn } from '../../lib/utils';
+import { DiffView } from './DiffView';
 import { Welcome } from './Welcome';
+
+export interface EditorHandle {
+  focus: () => void;
+  undo: () => void;
+  redo: () => void;
+  selectAll: () => void;
+  find: () => void;
+  replace: () => void;
+  toggleComment: () => void;
+  formatDocument: () => void;
+  goToLine: () => void;
+  goToSymbol: () => void;
+  goToDefinition: () => void;
+  expandSelection: () => void;
+  addCursorBelow: () => void;
+  insertText: (text: string) => void;
+  getSelection: () => string;
+  runCommand: (id: string) => void;
+}
+
+export interface DiffState {
+  path: string;
+  diff: FileDiff | null;
+  loading: boolean;
+}
 
 interface EditorPaneProps {
   openPaths: string[];
@@ -26,6 +52,13 @@ interface EditorPaneProps {
   onToggleAssistant: () => void;
   hasProvider: boolean;
   providerLabel: string | null;
+  handleRef: MutableRefObject<EditorHandle | null>;
+  onSelectionChange: (text: string) => void;
+  onAskAssistant: (text: string) => void;
+  diffState: DiffState | null;
+  onCloseDiff: () => void;
+  onReloadDiff: () => void;
+  onDiscardDiff: () => void;
 }
 
 type MonacoEditor = Parameters<OnMount>[0];
@@ -60,8 +93,18 @@ export function EditorPane({
   onToggleAssistant,
   hasProvider,
   providerLabel,
+  handleRef,
+  onSelectionChange,
+  onAskAssistant,
+  diffState,
+  onCloseDiff,
+  onReloadDiff,
+  onDiscardDiff,
 }: EditorPaneProps) {
   const editorRef = useRef<MonacoEditor | null>(null);
+  const askRef = useRef(onAskAssistant);
+  askRef.current = onAskAssistant;
+
   const dirtySet = new Set(dirtyPaths);
   const content = activePath ? buffers[activePath]?.content ?? '' : '';
   const isBufferReady = activePath ? buffers[activePath] !== undefined : false;
@@ -76,11 +119,101 @@ export function EditorPane({
     editor.focus();
   }, [reveal, activePath]);
 
+  useEffect(() => {
+    if (diffState) {
+      editorRef.current = null;
+      handleRef.current = null;
+    }
+  }, [diffState, handleRef]);
+
   const handleMount: OnMount = (editor) => {
     editorRef.current = editor;
+
     editor.onDidChangeCursorPosition((event) => {
       onCursorChange({ line: event.position.lineNumber, column: event.position.column });
     });
+
+    editor.onDidChangeCursorSelection(() => {
+      const model = editor.getModel();
+      const selection = editor.getSelection();
+      if (!model || !selection || selection.isEmpty()) {
+        onSelectionChange('');
+        return;
+      }
+      onSelectionChange(model.getValueInRange(selection));
+    });
+
+    const action = (id: string) => () => {
+      void editor.getAction(id)?.run();
+    };
+
+    handleRef.current = {
+      focus: () => editor.focus(),
+      undo: () => editor.trigger('menu', 'undo', null),
+      redo: () => editor.trigger('menu', 'redo', null),
+      selectAll: () => editor.trigger('menu', 'editor.action.selectAll', null),
+      find: action('actions.find'),
+      replace: action('editor.action.startFindReplaceAction'),
+      toggleComment: action('editor.action.commentLine'),
+      formatDocument: action('editor.action.formatDocument'),
+      goToLine: action('editor.action.gotoLine'),
+      goToSymbol: action('editor.action.quickOutline'),
+      goToDefinition: action('editor.action.revealDefinition'),
+      expandSelection: action('editor.action.smartSelect.expand'),
+      addCursorBelow: action('editor.action.insertCursorBelow'),
+      runCommand: action as unknown as (id: string) => void,
+      getSelection: () => {
+        const model = editor.getModel();
+        const selection = editor.getSelection();
+        if (!model || !selection || selection.isEmpty()) return '';
+        return model.getValueInRange(selection);
+      },
+      insertText: (text: string) => {
+        const model = editor.getModel();
+        if (!model) return;
+        const selection = editor.getSelection();
+        const target = selection ?? {
+          startLineNumber: model.getLineCount(),
+          startColumn: model.getLineMaxColumn(model.getLineCount()),
+          endLineNumber: model.getLineCount(),
+          endColumn: model.getLineMaxColumn(model.getLineCount()),
+        };
+
+        editor.executeEdits('safari-assistant', [
+          { range: target, text, forceMoveMarkers: true },
+        ]);
+        editor.pushUndoStop();
+        editor.focus();
+        editor.revealPositionInCenterIfOutsideViewport({
+          lineNumber: target.endLineNumber,
+          column: target.endColumn,
+        });
+      },
+    };
+
+    editor.addAction({
+      id: 'safari.askAssistant',
+      label: 'Ask Safari Assistant about selection',
+      contextMenuGroupId: 'safari',
+      contextMenuOrder: 1,
+      precondition: 'editorHasSelection',
+      run: (instance) => {
+        const model = instance.getModel();
+        const selection = instance.getSelection();
+        if (!model || !selection) return;
+        const text = model.getValueInRange(selection);
+        if (text.trim()) askRef.current(text);
+      },
+    });
+
+    editor.addAction({
+      id: 'safari.insertHere',
+      label: 'Safari: assistant can insert code at cursor',
+      contextMenuGroupId: 'safari',
+      contextMenuOrder: 2,
+      run: () => editor.focus(),
+    });
+
     editor.focus();
   };
 
@@ -113,9 +246,7 @@ export function EditorPane({
               title={path}
               className={cn(
                 'group relative flex max-w-[220px] min-w-0 cursor-pointer items-center gap-1.5 border-r border-line px-2.5 text-[12px] outline-none transition-colors',
-                isActive
-                  ? 'bg-app text-ink'
-                  : 'text-muted hover:bg-hover hover:text-ink',
+                isActive ? 'bg-app text-ink' : 'text-muted hover:bg-hover hover:text-ink',
               )}
             >
               {isActive && <span className="absolute inset-x-0 top-0 h-[2px] bg-accent" />}
@@ -149,7 +280,7 @@ export function EditorPane({
         })}
       </div>
 
-      {activePath && (
+      {activePath && !diffState && (
         <div className="flex h-7 shrink-0 items-center gap-1 border-b border-line bg-panel/60 px-3 text-[11px] text-faint">
           {segments.map((segment, index) => (
             <span key={`${segment}-${index}`} className="flex items-center gap-1">
@@ -171,7 +302,15 @@ export function EditorPane({
       )}
 
       <div className="relative flex-1 overflow-hidden">
-        {!activePath ? (
+        {diffState ? (
+          <DiffView
+            diff={diffState.diff}
+            loading={diffState.loading}
+            onClose={onCloseDiff}
+            onReload={onReloadDiff}
+            onDiscard={onDiscardDiff}
+          />
+        ) : !activePath ? (
           <Welcome
             onNewFile={onNewFile}
             onQuickOpen={onQuickOpen}

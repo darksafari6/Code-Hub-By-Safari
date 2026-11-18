@@ -1,16 +1,27 @@
 import { useState } from 'react';
-import { Check, Copy } from 'lucide-react';
+import { Check, Copy, CornerDownLeft } from 'lucide-react';
 import { parseInlineCode, parseMessageSegments } from '../../lib/markdown';
 import { IconButton } from '../ui/IconButton';
 
-export function MessageContent({ content }: { content: string }) {
+export function MessageContent({
+  content,
+  onInsertCode,
+}: {
+  content: string;
+  onInsertCode?: (code: string) => void;
+}) {
   const segments = parseMessageSegments(content);
 
   return (
     <div className="space-y-2.5 text-[12.5px] leading-relaxed">
       {segments.map((segment, index) =>
         segment.type === 'code' ? (
-          <CodeBlock key={index} code={segment.content} language={segment.language} />
+          <CodeBlock
+            key={index}
+            code={segment.content}
+            language={segment.language}
+            onInsert={onInsertCode}
+          />
         ) : (
           <p key={index} className="whitespace-pre-wrap break-words">
             {parseInlineCode(segment.content).map((part, partIndex) =>
@@ -32,7 +43,15 @@ export function MessageContent({ content }: { content: string }) {
   );
 }
 
-function CodeBlock({ code, language }: { code: string; language?: string }) {
+function CodeBlock({
+  code,
+  language,
+  onInsert,
+}: {
+  code: string;
+  language?: string;
+  onInsert?: (code: string) => void;
+}) {
   const [copied, setCopied] = useState(false);
 
   const copy = async () => {
@@ -51,9 +70,20 @@ function CodeBlock({ code, language }: { code: string; language?: string }) {
         <span className="text-[10.5px] uppercase tracking-wider text-faint">
           {language || 'code'}
         </span>
-        <IconButton label={copied ? 'Copied' : 'Copy code'} size="sm" onClick={copy}>
-          {copied ? <Check size={12} className="text-success" /> : <Copy size={12} />}
-        </IconButton>
+        <div className="flex items-center gap-0.5">
+          {onInsert && (
+            <IconButton
+              label="Insert this code into the active editor"
+              size="sm"
+              onClick={() => onInsert(code)}
+            >
+              <CornerDownLeft size={12} />
+            </IconButton>
+          )}
+          <IconButton label={copied ? 'Copied' : 'Copy code'} size="sm" onClick={copy}>
+            {copied ? <Check size={12} className="text-success" /> : <Copy size={12} />}
+          </IconButton>
+        </div>
       </div>
       <pre className="scrollbar-thin overflow-x-auto p-2.5 font-mono text-[11.5px] leading-relaxed">
         <code>{code}</code>

@@ -187,6 +187,64 @@ export function SettingsDialog({
                 </button>
               ))
             )}
+
+            {providers.length > 0 && (
+              <div className="space-y-1 rounded-md border border-line p-2.5">
+                <label className="block text-[12px] text-ink" htmlFor="settings-model">
+                  Model override
+                </label>
+                <input
+                  id="settings-model"
+                  value={settings.models[settings.provider] ?? ''}
+                  onChange={(event) => {
+                    const value = event.target.value.trim();
+                    const next = { ...settings.models };
+                    if (value) next[settings.provider] = value;
+                    else delete next[settings.provider];
+                    update('models', next);
+                  }}
+                  placeholder={
+                    providers.find((provider) => provider.id === settings.provider)?.model ?? ''
+                  }
+                  spellCheck={false}
+                  className="h-8 w-full rounded-md border border-line bg-app px-2 font-mono text-[12px] text-ink outline-none placeholder:text-faint focus:border-accent"
+                />
+                <p className="text-[11px] leading-relaxed text-faint">
+                  Leave empty to use the provider default. The assistant can also discover the
+                  models your key can reach.
+                </p>
+              </div>
+            )}
+          </div>
+        </section>
+
+        <section>
+          <SectionTitle title="Git identity" />
+          <div className="space-y-2.5">
+            <label className="block space-y-1">
+              <span className="text-[12px] text-ink">Author name</span>
+              <input
+                value={settings.gitName}
+                onChange={(event) => update('gitName', event.target.value)}
+                placeholder="Safari Developer"
+                spellCheck={false}
+                className="h-8 w-full rounded-md border border-line bg-app px-2 text-[12px] text-ink outline-none placeholder:text-faint focus:border-accent"
+              />
+            </label>
+            <label className="block space-y-1">
+              <span className="text-[12px] text-ink">Author email</span>
+              <input
+                value={settings.gitEmail}
+                onChange={(event) => update('gitEmail', event.target.value)}
+                placeholder="developer@example.com"
+                spellCheck={false}
+                className="h-8 w-full rounded-md border border-line bg-app px-2 text-[12px] text-ink outline-none placeholder:text-faint focus:border-accent"
+              />
+            </label>
+            <p className="text-[11px] leading-relaxed text-faint">
+              Sent with each commit so history is attributed correctly. Empty values fall back to
+              the repository configuration.
+            </p>
           </div>
         </section>
 

@@ -66,9 +66,16 @@ function getProvider(id: ProviderId): ProviderInfo {
 export interface ChatRequest {
   provider: ProviderId;
   messages: ChatMessage[];
+  /** Optional model override; falls back to the configured default. */
+  model?: string;
   system?: string;
   temperature?: number;
   maxTokens?: number;
+}
+
+export interface ModelInfo {
+  id: string;
+  label: string;
 }
 
 /** Yields incremental text chunks. Errors surface as HttpError. */
@@ -95,7 +102,7 @@ async function* streamGemini(request: ChatRequest): AsyncGenerator<string> {
 
   try {
     const stream = await ai.models.generateContentStream({
-      model: config.ai.gemini.model,
+      model: request.model?.trim() || config.ai.gemini.model,
       contents: request.messages.map((message) => ({
         role: message.role === 'assistant' ? 'model' : 'user',
         parts: [{ text: message.content }],
@@ -140,7 +147,7 @@ async function* streamOpenAiCompatible(
         ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
       },
       body: JSON.stringify({
-        model: provider.model,
+        model: request.model?.trim() || provider.model,
         messages,
         stream: true,
         ...(typeof request.temperature === 'number' ? { temperature: request.temperature } : {}),
@@ -246,4 +253,74 @@ export function createRateLimiter(options: { windowMs: number; max: number }) {
     entry.count += 1;
     return true;
   };
+}
+
+/**
+ * List the models a provider currently offers. The result is best-effort: some
+ * gateways do not implement `/models`, in which case the UI falls back to the
+ * configured default.
+ */
+export async function listModels(providerId: ProviderId): Promise<ModelInfo[]> {
+  const provider = getProvider(providerId);
+
+  if (providerId === 'gemini') {
+    const apiKey = config.ai.gemini.apiKey;
+    if (!apiKey) throw new HttpError(400, 'GEMINI_API_KEY is not configured');
+
+    const ai = new GoogleGenAI({ apiKey });
+    const models: ModelInfo[] = [];
+
+    try {
+      const pager = await ai.models.list();
+      for await (const model of pager) {
+        const id = model.name?.replace(/^models\//, '');
+        if (!id) continue;
+        const actions = model.supportedActions;
+        if (Array.isArray(actions) && actions.length > 0 && !actions.includes('generateContent')) {
+          continue;
+        }
+        models.push({ id, label: model.displayName?.trim() || id });
+        if (models.length >= 200) break;
+      }
+    } catch (error) {
+      throw toProviderError(error, 'Gemini');
+    }
+
+    return models.sort((a, b) => a.id.localeCompare(b.id));
+  }
+
+  const apiKey =
+    providerId === 'deepseek' ? config.ai.deepseek.apiKey : config.ai.openai.apiKey;
+  const baseUrl =
+    providerId === 'deepseek' ? config.ai.deepseek.baseUrl : config.ai.openai.baseUrl;
+  const endpoint = `${baseUrl.replace(/\/+$/, '')}/models`;
+
+  let response: Response;
+  try {
+    response = await fetch(endpoint, {
+      headers: apiKey ? { Authorization: `Bearer ${apiKey}` } : {},
+    });
+  } catch (error) {
+    throw new HttpError(502, `Could not reach ${provider.label}. ${errorMessage(error)}`);
+  }
+
+  if (!response.ok) {
+    throw toProviderError(
+      { status: response.status, message: `GET /models returned ${response.status}` },
+      provider.label,
+    );
+  }
+
+  const payload = (await response.json().catch(() => ({}))) as {
+    data?: Array<{ id?: string }>;
+  };
+
+  const models = (payload.data ?? [])
+    .map((entry) => entry.id)
+    .filter((id): id is string => typeof id === 'string' && id.length > 0)
+    .sort((a, b) => a.localeCompare(b))
+    .slice(0, 200)
+    .map((id) => ({ id, label: id }));
+
+  return models;
 }
