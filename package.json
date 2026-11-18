@@ -60,6 +60,7 @@
   "build": {
     "appId": "com.safariaidevstudio.app",
     "productName": "Safari AI Dev Studio",
+    "asar": false,
     "directories": {
       "output": "release"
     },

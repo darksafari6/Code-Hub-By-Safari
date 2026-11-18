@@ -169,6 +169,11 @@ npm run dist:desktop        # -> release/*.AppImage, release/*.deb
 The packaged app starts the bundled server on port 3000 and stores its workspace
 in `~/Documents/SafariWorkspace` (override with `WORKSPACE_DIR`). Linux packages
 are produced with electron-builder (`AppImage` and `deb`, category Development).
+The server runs as a plain Node child process (`ELECTRON_RUN_AS_NODE`), and the
+app keeps a single-instance lock so two windows never fight over the port.
+
+To work on the shell itself, run `npm run dev` in one terminal and `npm run
+desktop` in another: the Electron window loads the Vite dev server.
 
 ## Architecture
 

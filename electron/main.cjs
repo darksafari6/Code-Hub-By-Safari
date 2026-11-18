@@ -210,9 +210,13 @@ function startServer() {
     );
   }
 
+  // ELECTRON_RUN_AS_NODE turns the Electron binary into a plain Node runtime, so
+  // the bundled server runs exactly as it does under `npm start`. asar is
+  // disabled by the builder config, so `entry` is always a real file path.
   serverProcess = spawn(process.execPath, [entry], {
     env: {
       ...process.env,
+      ELECTRON_RUN_AS_NODE: '1',
       NODE_ENV: 'production',
       PORT: String(PORT),
       HOST,
@@ -272,20 +276,35 @@ async function createWindow() {
   await mainWindow.loadURL(target);
 }
 
-app.whenReady().then(async () => {
-  buildApplicationMenu();
+const hasSingleInstanceLock = app.requestSingleInstanceLock();
 
-  try {
-    await createWindow();
-  } catch (error) {
-    console.error(error);
-    app.quit();
-  }
+if (!hasSingleInstanceLock) {
+  // A second launch would fight over the same server port.
+  app.quit();
+}
 
-  app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) void createWindow();
-  });
+app.on('second-instance', () => {
+  if (!mainWindow) return;
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  mainWindow.focus();
 });
+
+if (hasSingleInstanceLock) {
+  app.whenReady().then(async () => {
+    buildApplicationMenu();
+
+    try {
+      await createWindow();
+    } catch (error) {
+      console.error(error);
+      app.quit();
+    }
+
+    app.on('activate', () => {
+      if (BrowserWindow.getAllWindows().length === 0) void createWindow();
+    });
+  });
+}
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();
