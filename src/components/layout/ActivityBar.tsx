@@ -1,81 +1,89 @@
-import React from 'react';
-import { Files, Search, GitBranch, MessageSquare, Settings, User, Bell } from 'lucide-react';
+import { Files, GitBranch, Search, Settings, Sparkles } from 'lucide-react';
+import type { SidebarView } from '../../lib/types';
 import { cn } from '../../lib/utils';
+import { IconButton } from '../ui/IconButton';
 
 interface ActivityBarProps {
-  activeTab: string;
-  setActiveTab: (tab: any) => void;
-  isSideBarVisible: boolean;
-  setIsSideBarVisible: (visible: boolean) => void;
-  onSettingsOpen: () => void;
+  view: SidebarView;
+  onSelectView: (view: SidebarView) => void;
+  sidebarVisible: boolean;
+  onToggleSidebar: () => void;
+  assistantOpen: boolean;
+  onToggleAssistant: () => void;
+  onOpenSettings: () => void;
 }
 
-export const ActivityBar: React.FC<ActivityBarProps> = ({
-  activeTab,
-  setActiveTab,
-  isSideBarVisible,
-  setIsSideBarVisible,
-  onSettingsOpen
-}) => {
-  const items = [
-    { id: 'explorer', icon: Files, label: 'Explorer' },
-    { id: 'search', icon: Search, label: 'Search' },
-    { id: 'git', icon: GitBranch, label: 'Source Control' },
-    { id: 'ai', icon: MessageSquare, label: 'AI Assistant' },
-  ];
+const VIEWS: Array<{ id: SidebarView; label: string; icon: typeof Files }> = [
+  { id: 'explorer', label: 'Explorer', icon: Files },
+  { id: 'search', label: 'Search', icon: Search },
+  { id: 'git', label: 'Source control', icon: GitBranch },
+];
 
+export function ActivityBar({
+  view,
+  onSelectView,
+  sidebarVisible,
+  onToggleSidebar,
+  assistantOpen,
+  onToggleAssistant,
+  onOpenSettings,
+}: ActivityBarProps) {
   return (
-    <div className="w-16 glass-dark border-r border-white/5 flex flex-col items-center py-8 space-y-8 z-20 shadow-2xl relative">
-      <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-blue-500 via-purple-500 to-pink-500 opacity-50" />
-      
-      {items.map((item) => (
+    <nav
+      aria-label="Primary navigation"
+      className="flex w-12 shrink-0 flex-col items-center justify-between border-r border-line bg-panel py-2"
+    >
+      <div className="flex w-full flex-col items-center gap-1">
+        {VIEWS.map((entry) => {
+          const active = sidebarVisible && view === entry.id;
+          return (
+            <button
+              key={entry.id}
+              type="button"
+              title={entry.label}
+              aria-label={entry.label}
+              aria-pressed={active}
+              onClick={() => {
+                if (active) {
+                  onToggleSidebar();
+                  return;
+                }
+                onSelectView(entry.id);
+                if (!sidebarVisible) onToggleSidebar();
+              }}
+              className={cn(
+                'relative flex h-10 w-10 items-center justify-center rounded-lg transition-colors',
+                active ? 'bg-elevated text-ink' : 'text-muted hover:bg-hover hover:text-ink',
+              )}
+            >
+              {active && (
+                <span className="absolute -left-2 top-1/2 h-6 w-[3px] -translate-y-1/2 rounded-r bg-accent" />
+              )}
+              <entry.icon size={19} strokeWidth={1.8} />
+            </button>
+          );
+        })}
+
         <button
-          key={item.id}
-          onClick={() => {
-            if (activeTab === item.id && isSideBarVisible) {
-              setIsSideBarVisible(false);
-            } else {
-              setActiveTab(item.id);
-              setIsSideBarVisible(true);
-            }
-          }}
+          type="button"
+          title="Safari Assistant"
+          aria-label="Safari Assistant"
+          aria-pressed={assistantOpen}
+          onClick={onToggleAssistant}
           className={cn(
-            "p-3 rounded-2xl transition-all duration-500 group relative hover:scale-110 active:scale-95",
-            activeTab === item.id && isSideBarVisible
-              ? "text-white bg-gradient-to-br from-blue-500/20 to-indigo-600/20 shadow-2xl shadow-blue-500/20 ring-1 ring-white/20"
-              : "text-zinc-500 hover:text-zinc-300 hover:bg-white/5"
+            'relative flex h-10 w-10 items-center justify-center rounded-lg transition-colors',
+            assistantOpen ? 'bg-accent-soft text-accent' : 'text-muted hover:bg-hover hover:text-ink',
           )}
         >
-          <item.icon size={24} strokeWidth={1.5} className={cn("transition-all duration-500", activeTab === item.id && isSideBarVisible ? "scale-110 text-blue-400 drop-shadow-[0_0_8px_rgba(96,165,250,0.5)]" : "group-hover:scale-110")} />
-          <div className="absolute left-full ml-6 px-4 py-2 glass text-white text-[13px] font-bold rounded-xl opacity-0 group-hover:opacity-100 pointer-events-none transition-all duration-300 translate-x-[-20px] group-hover:translate-x-0 whitespace-nowrap z-50 shadow-2xl border border-white/10 backdrop-blur-2xl">
-            {item.label}
-          </div>
-          {activeTab === item.id && isSideBarVisible && (
-            <div className="absolute -left-1 top-1/2 -translate-y-1/2 w-1.5 h-10 bg-gradient-to-b from-blue-400 to-indigo-600 rounded-r-full shadow-[0_0_15px_rgba(96,165,250,0.6)] animate-pulse" />
-          )}
-        </button>
-      ))}
-      
-      <div className="flex-1" />
-
-      <div className="flex flex-col space-y-6 pb-4">
-        <button className="p-3 rounded-2xl text-zinc-500 hover:text-zinc-300 hover:bg-white/5 transition-all duration-500 group relative hover:scale-110 active:scale-95">
-          <Bell size={22} strokeWidth={1.5} className="group-hover:scale-110 transition-transform" />
-          <div className="absolute left-full ml-6 px-4 py-2 glass text-white text-[13px] font-bold rounded-xl opacity-0 group-hover:opacity-100 pointer-events-none transition-all duration-300 translate-x-[-20px] group-hover:translate-x-0 whitespace-nowrap z-50 shadow-2xl border border-white/10 backdrop-blur-2xl">
-            Notifications
-          </div>
-        </button>
-
-        <button 
-          onClick={onSettingsOpen}
-          className="p-3 rounded-2xl text-zinc-500 hover:text-zinc-300 hover:bg-white/5 transition-all duration-500 group relative hover:scale-110 active:scale-95"
-        >
-          <Settings size={22} strokeWidth={1.5} className="group-hover:rotate-90 transition-transform duration-700" />
-          <div className="absolute left-full ml-6 px-4 py-2 glass text-white text-[13px] font-bold rounded-xl opacity-0 group-hover:opacity-100 pointer-events-none transition-all duration-300 translate-x-[-20px] group-hover:translate-x-0 whitespace-nowrap z-50 shadow-2xl border border-white/10 backdrop-blur-2xl">
-            Settings
-          </div>
+          <Sparkles size={19} strokeWidth={1.8} />
         </button>
       </div>
-    </div>
+
+      <div className="flex flex-col items-center gap-1">
+        <IconButton label="Settings" className="h-9 w-9" onClick={onOpenSettings}>
+          <Settings size={18} strokeWidth={1.8} />
+        </IconButton>
+      </div>
+    </nav>
   );
-};
+}

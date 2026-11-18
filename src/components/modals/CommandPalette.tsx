@@ -1,193 +1,186 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { Search, Command, FileCode, MessageSquare, GitBranch, Settings, Terminal, Play, Square, X, ChevronRight } from 'lucide-react';
-import { motion, AnimatePresence } from 'motion/react';
-import { cn } from '../../lib/utils';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { CornerDownLeft, FileCode2, Search, TerminalSquare } from 'lucide-react';
+import { basename, cn } from '../../lib/utils';
 
-interface CommandPaletteProps {
-  isOpen: boolean;
-  onClose: () => void;
-  onCommand: (command: string) => void;
-  files: any[];
-  openFile: (path: string) => void;
+export interface PaletteCommand {
+  id: string;
+  label: string;
+  hint?: string;
+  group: string;
+  run: () => void;
 }
 
-export const CommandPalette: React.FC<CommandPaletteProps> = ({
-  isOpen,
-  onClose,
-  onCommand,
+interface CommandPaletteProps {
+  open: boolean;
+  commands: PaletteCommand[];
+  files: Array<{ name: string; path: string }>;
+  onClose: () => void;
+  onOpenFile: (path: string) => void;
+}
+
+type Item =
+  | { kind: 'command'; id: string; label: string; hint: string; group: string; run: () => void }
+  | { kind: 'file'; id: string; label: string; hint: string; group: string; path: string };
+
+export function CommandPalette({
+  open,
+  commands,
   files,
-  openFile
-}) => {
+  onClose,
+  onOpenFile,
+}: CommandPaletteProps) {
   const [query, setQuery] = useState('');
-  const [selectedIndex, setSelectedIndex] = useState(0);
+  const [selected, setSelected] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
-
-  const commands = [
-    { id: 'explorer', name: 'Show Explorer', icon: <FileCode size={18} />, category: 'Navigation' },
-    { id: 'search', name: 'Search Files', icon: <Search size={18} />, category: 'Navigation' },
-    { id: 'git', name: 'Source Control', icon: <GitBranch size={18} />, category: 'Navigation' },
-    { id: 'ai', name: 'AI Assistant', icon: <MessageSquare size={18} />, category: 'Navigation' },
-    { id: 'settings', name: 'Open Settings', icon: <Settings size={18} />, category: 'System' },
-    { id: 'terminal', name: 'Toggle Terminal', icon: <Terminal size={18} />, category: 'System' },
-    { id: 'auto-mode', name: 'Toggle Auto Mode', icon: <Play size={18} />, category: 'AI' },
-  ];
-
-  const filteredCommands = commands.filter(cmd => 
-    cmd.name.toLowerCase().includes(query.toLowerCase())
-  );
-
-  const flatFiles = (items: any[]): any[] => {
-    return items.reduce((acc, item) => {
-      if (item.type === 'file') {
-        acc.push(item);
-      }
-      if (item.children) {
-        acc.push(...flatFiles(item.children));
-      }
-      return acc;
-    }, []);
-  };
-
-  const filteredFiles = flatFiles(files).filter(file => 
-    file.name.toLowerCase().includes(query.toLowerCase())
-  ).slice(0, 5);
-
-  const results = [...filteredCommands, ...filteredFiles.map(f => ({ ...f, id: `file:${f.path}`, category: 'Files', icon: <FileCode size={18} /> }))];
+  const listRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    if (isOpen) {
-      setQuery('');
-      setSelectedIndex(0);
-      setTimeout(() => inputRef.current?.focus(), 100);
-    }
-  }, [isOpen]);
+    if (!open) return;
+    setQuery('');
+    setSelected(0);
+    const timer = window.setTimeout(() => inputRef.current?.focus(), 20);
+    return () => window.clearTimeout(timer);
+  }, [open]);
+
+  const items = useMemo<Item[]>(() => {
+    const needle = query.trim().toLowerCase();
+
+    const commandItems = commands
+      .filter((command) => !needle || command.label.toLowerCase().includes(needle))
+      .map<Item>((command) => ({
+        kind: 'command',
+        id: command.id,
+        label: command.label,
+        hint: command.hint ?? command.group,
+        group: command.group,
+        run: command.run,
+      }));
+
+    const fileItems = files
+      .filter((file) => !needle || file.path.toLowerCase().includes(needle))
+      .slice(0, 40)
+      .map<Item>((file) => ({
+        kind: 'file',
+        id: `file:${file.path}`,
+        label: basename(file.path),
+        hint: file.path,
+        group: 'Files',
+        path: file.path,
+      }));
+
+    if (!needle) return [...commandItems, ...fileItems];
+    return [...commandItems, ...fileItems];
+  }, [commands, files, query]);
 
   useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (!isOpen) return;
+    if (selected >= items.length) setSelected(items.length > 0 ? items.length - 1 : 0);
+  }, [items.length, selected]);
 
-      if (e.key === 'ArrowDown') {
-        e.preventDefault();
-        setSelectedIndex(prev => (prev + 1) % results.length);
-      } else if (e.key === 'ArrowUp') {
-        e.preventDefault();
-        setSelectedIndex(prev => (prev - 1 + results.length) % results.length);
-      } else if (e.key === 'Enter') {
-        e.preventDefault();
-        handleSelect(results[selectedIndex]);
-      } else if (e.key === 'Escape') {
-        onClose();
-      }
-    };
+  useEffect(() => {
+    const active = listRef.current?.querySelector<HTMLElement>('[data-active="true"]');
+    active?.scrollIntoView({ block: 'nearest' });
+  }, [selected]);
 
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isOpen, selectedIndex, results]);
+  if (!open) return null;
 
-  const handleSelect = (item: any) => {
-    if (item.id.startsWith('file:')) {
-      openFile(item.path);
-    } else {
-      onCommand(item.id);
-    }
+  const choose = (item: Item | undefined) => {
+    if (!item) return;
     onClose();
+    if (item.kind === 'file') onOpenFile(item.path);
+    else item.run();
   };
 
   return (
-    <AnimatePresence>
-      {isOpen && (
-        <div className="fixed inset-0 z-[100] flex items-start justify-center pt-[15vh] px-4">
-          <motion.div 
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            onClick={onClose}
-            className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+    <div className="fixed inset-0 z-50 flex items-start justify-center px-4 pt-[12vh]">
+      <div className="absolute inset-0 bg-black/50 backdrop-blur-[2px]" onClick={onClose} aria-hidden />
+
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label="Command palette"
+        className="relative w-full max-w-xl overflow-hidden rounded-xl border border-line bg-panel shadow-2xl"
+      >
+        <div className="flex items-center gap-2 border-b border-line px-3 py-2.5">
+          <Search size={15} className="text-faint" />
+          <input
+            ref={inputRef}
+            value={query}
+            onChange={(event) => {
+              setQuery(event.target.value);
+              setSelected(0);
+            }}
+            onKeyDown={(event) => {
+              if (event.key === 'ArrowDown') {
+                event.preventDefault();
+                setSelected((value) => Math.min(value + 1, items.length - 1));
+              } else if (event.key === 'ArrowUp') {
+                event.preventDefault();
+                setSelected((value) => Math.max(value - 1, 0));
+              } else if (event.key === 'Enter') {
+                event.preventDefault();
+                choose(items[selected]);
+              } else if (event.key === 'Escape') {
+                event.preventDefault();
+                onClose();
+              }
+            }}
+            placeholder="Type a command or search files…"
+            className="flex-1 bg-transparent text-[13px] text-ink outline-none placeholder:text-faint"
           />
-          
-          <motion.div 
-            initial={{ opacity: 0, scale: 0.95, y: -20 }}
-            animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.95, y: -20 }}
-            className="w-full max-w-2xl glass-card overflow-hidden shadow-[0_0_50px_rgba(0,0,0,0.5)] border-white/10 ring-1 ring-white/10"
-          >
-            <div className="p-5 border-b border-white/5 flex items-center space-x-4 bg-white/5">
-              <Search className="text-zinc-500" size={20} />
-              <input 
-                ref={inputRef}
-                type="text" 
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                placeholder="Type a command or search files..." 
-                className="flex-1 bg-transparent border-none outline-none text-lg text-zinc-200 placeholder-zinc-600"
-              />
-              <div className="flex items-center space-x-2 px-2 py-1 bg-black/40 rounded-lg border border-white/10 text-[10px] font-black text-zinc-500 uppercase tracking-tighter">
-                <span>ESC</span>
-              </div>
-            </div>
-
-            <div className="max-h-[60vh] overflow-y-auto custom-scrollbar p-2">
-              {results.length === 0 ? (
-                <div className="py-12 text-center text-zinc-500 italic opacity-40">
-                  No results found for "{query}"
-                </div>
-              ) : (
-                <div className="space-y-1">
-                  {results.map((item, idx) => (
-                    <div 
-                      key={item.id}
-                      onClick={() => handleSelect(item)}
-                      onMouseEnter={() => setSelectedIndex(idx)}
-                      className={cn(
-                        "flex items-center justify-between px-4 py-3.5 rounded-xl cursor-pointer transition-all group",
-                        selectedIndex === idx 
-                          ? "bg-blue-500/10 text-blue-400 border border-blue-500/20 shadow-lg" 
-                          : "text-zinc-400 hover:bg-white/5 hover:text-zinc-200 border border-transparent"
-                      )}
-                    >
-                      <div className="flex items-center space-x-4">
-                        <div className={cn(
-                          "p-2 rounded-lg transition-colors",
-                          selectedIndex === idx ? "bg-blue-500/20 text-blue-400" : "bg-white/5 text-zinc-500 group-hover:text-zinc-300"
-                        )}>
-                          {item.icon}
-                        </div>
-                        <div className="flex flex-col">
-                          <span className="text-[14px] font-bold">{item.name || item.path?.split('/').pop()}</span>
-                          <span className="text-[11px] font-medium opacity-50 uppercase tracking-wider">{item.category}</span>
-                        </div>
-                      </div>
-                      {selectedIndex === idx && (
-                        <div className="flex items-center space-x-2 animate-fade-in">
-                          <span className="text-[11px] font-black opacity-40 uppercase tracking-tighter">Select</span>
-                          <ChevronRight size={14} className="opacity-40" />
-                        </div>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            <div className="p-4 border-t border-white/5 bg-black/40 flex items-center justify-between text-[11px] font-bold text-zinc-500">
-              <div className="flex items-center space-x-6">
-                <div className="flex items-center space-x-2">
-                  <kbd className="px-2 py-1 bg-white/5 rounded border border-white/10 text-zinc-400">↑↓</kbd>
-                  <span>Navigate</span>
-                </div>
-                <div className="flex items-center space-x-2">
-                  <kbd className="px-2 py-1 bg-white/5 rounded border border-white/10 text-zinc-400">Enter</kbd>
-                  <span>Select</span>
-                </div>
-              </div>
-              <div className="flex items-center space-x-2">
-                <Command size={12} />
-                <span>Command Palette</span>
-              </div>
-            </div>
-          </motion.div>
+          <kbd className="rounded border border-line bg-elevated px-1.5 py-0.5 text-[10px] text-faint">
+            ESC
+          </kbd>
         </div>
-      )}
-    </AnimatePresence>
+
+        <div ref={listRef} className="scrollbar-thin max-h-[55vh] overflow-y-auto p-1.5">
+          {items.length === 0 ? (
+            <p className="px-3 py-8 text-center text-[12px] text-faint">
+              No matches for “{query}”
+            </p>
+          ) : (
+            items.map((item, index) => (
+              <button
+                key={item.id}
+                type="button"
+                data-active={index === selected}
+                onMouseEnter={() => setSelected(index)}
+                onClick={() => choose(item)}
+                className={cn(
+                  'flex w-full items-center gap-2.5 rounded-md px-2.5 py-1.5 text-left transition-colors',
+                  index === selected ? 'bg-accent-soft text-ink' : 'text-muted hover:bg-hover',
+                )}
+              >
+                <span
+                  className={cn(
+                    'flex h-5 w-5 shrink-0 items-center justify-center rounded',
+                    index === selected ? 'bg-accent/15 text-accent' : 'bg-elevated text-faint',
+                  )}
+                >
+                  {item.kind === 'file' ? (
+                    <FileCode2 size={13} />
+                  ) : item.group === 'Terminal' ? (
+                    <TerminalSquare size={13} />
+                  ) : (
+                    <CornerDownLeft size={13} />
+                  )}
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-[12.5px]">{item.label}</span>
+                  <span className="block truncate text-[11px] text-faint">{item.hint}</span>
+                </span>
+                <span className="shrink-0 rounded bg-elevated px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-faint">
+                  {item.group}
+                </span>
+              </button>
+            ))
+          )}
+        </div>
+
+        <div className="flex items-center justify-between border-t border-line bg-elevated/40 px-3 py-1.5 text-[10.5px] text-faint">
+          <span>↑↓ navigate · Enter select</span>
+          <span>{items.length} results</span>
+        </div>
+      </div>
+    </div>
   );
-};
+}

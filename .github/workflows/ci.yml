@@ -1,0 +1,128 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  verify:
+    name: Typecheck, test, build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+        env:
+          # Electron is only needed for desktop packaging, not for CI checks.
+          ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Unit tests
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+      - name: Smoke test the legacy Node server
+        run: |
+          npm run start:node &
+          for attempt in $(seq 1 40); do
+            if curl -fsS http://127.0.0.1:3000/api/health > /dev/null; then break; fi
+            sleep 0.5
+          done
+          curl -fsS http://127.0.0.1:3000/api/health
+          curl -fsS http://127.0.0.1:3000/api/files/tree
+          if curl -fsS "http://127.0.0.1:3000/api/files/content?path=../package.json"; then
+            echo "Path traversal was not blocked"; exit 1
+          fi
+
+  python:
+    name: Python runtime (pytest)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: python/requirements.txt
+
+      - name: Install dependencies
+        run: pip install -r python/requirements.txt pytest
+
+      - name: Unit tests (paths, git, PTY, HTTP API)
+        run: PYTHONPATH=python python -m pytest python/tests -q
+
+      - name: Smoke test the Python server
+        run: |
+          PYTHONPATH=python PORT=8123 python -m safari &
+          for attempt in $(seq 1 40); do
+            if curl -fsS http://127.0.0.1:8123/api/health > /dev/null; then break; fi
+            sleep 0.5
+          done
+          curl -fsS http://127.0.0.1:8123/api/health
+          curl -fsS http://127.0.0.1:8123/api/system/info | grep -q '"terminal": *"pty"'
+          if curl -fsS "http://127.0.0.1:8123/api/files/content?path=../package.json"; then
+            echo "Path traversal was not blocked"; exit 1
+          fi
+
+  bundle:
+    name: Portable Linux bundle
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install frontend dependencies
+        run: npm ci
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+
+      - name: Build the client bundle
+        run: npm run build:web
+
+      - name: Package the portable Linux application
+        run: PACKAGING_PYTHON="$(command -v python3)" ./scripts/package-linux.sh
+
+      - name: Smoke test the packaged bundle
+        run: |
+          cd dist-linux
+          tar xzf SafariAIDevStudio-*.tar.gz
+          cd SafariAIDevStudio-*/
+          ./safari-ai-dev-studio --server-only --port 8123 &
+          for attempt in $(seq 1 40); do
+            if curl -fsS http://127.0.0.1:8123/api/health > /dev/null; then break; fi
+            sleep 0.5
+          done
+          curl -fsS http://127.0.0.1:8123/api/health
+          curl -fsS http://127.0.0.1:8123/api/system/info | grep -q '"terminal": *"pty"'
+          curl -fsS http://127.0.0.1:8123/ | grep -q '<div id="root">'
+          if curl -fsS "http://127.0.0.1:8123/api/files/content?path=../package.json"; then
+            echo "Path traversal was not blocked"; exit 1
+          fi
+          test -f install.sh && test -f share/safari-ai-dev-studio.desktop
