@@ -5,4 +5,4 @@ real PTY-backed terminal. Start it with `python -m safari` or `./scripts/dev.sh`
 """
 
 __all__ = ["app", "config"]
-__version__ = "3.0.0"
+__version__ = "3.1.0"

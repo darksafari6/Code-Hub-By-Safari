@@ -10,15 +10,32 @@ from __future__ import annotations
 import os
 import pathlib
 import re
+import sys
 from dataclasses import dataclass, field
 
 from dotenv import load_dotenv
 
+#: True inside a PyInstaller binary. Bundled data (the client build and the
+#: manifest) lives in a read-only extraction directory, while the workspace must
+#: stay writable, so the two are resolved separately below.
+FROZEN = bool(getattr(sys, "frozen", False))
+
+#: True for any packaged layout (frozen binary or the portable bundle), where the
+#: application directory must be treated as read-only.
+PACKAGED = FROZEN or bool(os.environ.get("SAFARI_PACKAGED"))
+
 # The repository root, derived from this file (python/safari/config.py) so the
-# server can be started from any working directory. SAFARI_ROOT overrides it for
-# packaged installs.
-ROOT = pathlib.Path(os.environ.get("SAFARI_ROOT") or pathlib.Path(__file__).resolve().parents[2]).resolve()
+# server can be started from any working directory. SAFARI_ROOT overrides it, and
+# a frozen binary points at its extraction directory instead.
+if FROZEN:
+    ROOT = pathlib.Path(getattr(sys, "_MEIPASS", pathlib.Path(__file__).resolve().parent))
+else:
+    ROOT = pathlib.Path(
+        os.environ.get("SAFARI_ROOT") or pathlib.Path(__file__).resolve().parents[2]
+    ).resolve()
 load_dotenv(ROOT / ".env", override=False)
+# Packaged installs keep their configuration next to the user's other config.
+load_dotenv(pathlib.Path.home() / ".config" / "safari-ai-dev-studio" / ".env", override=False)
 
 
 def _env(name: str) -> str | None:
@@ -30,6 +47,8 @@ def _env(name: str) -> str | None:
 
 
 def _version() -> str:
+    if FROZEN:
+        return "3.1.0"
     manifest = ROOT / "package.json"
     try:
         import json
@@ -41,7 +60,13 @@ def _version() -> str:
 
 def _workspace() -> pathlib.Path:
     configured = _env("WORKSPACE_DIR")
-    path = pathlib.Path(configured).expanduser() if configured else ROOT / "workspace"
+    if configured:
+        path = pathlib.Path(configured).expanduser()
+    elif PACKAGED:
+        # A packaged app must never write into its own bundle.
+        path = pathlib.Path.home() / "SafariWorkspace"
+    else:
+        path = ROOT / "workspace"
     if not path.is_absolute():
         path = (ROOT / path).resolve()
     path.mkdir(parents=True, exist_ok=True)

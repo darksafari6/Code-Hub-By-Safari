@@ -1,6 +1,6 @@
 {
   "name": "safari-ai-dev-studio",
-  "version": "3.0.0",
+  "version": "3.1.0",
   "private": true,
   "type": "module",
   "description": "An open-source, AI-assisted development environment for Linux: Python runtime, real PTY terminal, native git, React UI.",

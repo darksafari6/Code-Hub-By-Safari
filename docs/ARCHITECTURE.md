@@ -30,8 +30,11 @@ python/safari/
   pty_session.py  forkpty session, output queue, resize, process-group teardown
   ai.py           Gemini + OpenAI-compatible streaming, model discovery, rate limit
   app.py          FastAPI routes, auth guard, preview server, SPA host, /ws/pty
+  desktop.py      GTK3/WebKit2 → GTK4/WebKit6 → browser shell, --server-only
+  launcher.py     PyInstaller entry point (delegates to desktop.main)
   __main__.py     `python -m safari`
-python/tests/     pytest: path jail, git, PTY, HTTP contract, websocket auth
+python/tests/     pytest: path jail, git, PTY, HTTP contract, websocket auth,
+                  desktop shell helpers
 ```
 
 ### Bash tooling
@@ -39,8 +42,9 @@ python/tests/     pytest: path jail, git, PTY, HTTP contract, websocket auth
 `scripts/install.sh` creates `.venv` and installs both dependency sets;
 `scripts/dev.sh` runs the API and Vite with the proxy and cleans up both on exit;
 `scripts/run.sh` builds the UI and serves everything from Python;
-`scripts/test.sh` runs pytest, vitest and `tsc`. The `Makefile` exposes the same
-commands as `make install|dev|run|test|lint`.
+`scripts/test.sh` runs pytest, vitest and `tsc`; `scripts/package-linux.sh`
+builds the portable bundle described below. The `Makefile` exposes the same
+commands as `make install|dev|run|test|lint|package`.
 
 ### PTY websocket protocol
 
@@ -75,6 +79,59 @@ Browser ──HTTP──▶ /api/files/*   ──▶ files.ts   ──▶ safe-p
         ──HTTP──▶ /api/system/*  ──▶ os metrics
         ──WS────▶ /ws/terminal   ──▶ terminal.ts ──▶ bash (workspace cwd)
 ```
+
+## Desktop shell and packaging
+
+The release artifact is `dist-linux/SafariAIDevStudio-<version>-<arch>.tar.gz`,
+produced by `scripts/package-linux.sh`:
+
+```
+SafariAIDevStudio-3.1.0-x86_64/
+  safari-ai-dev-studio   Bash launcher: checks python3 >= 3.11, exports
+                         SAFARI_PACKAGED/SAFARI_ROOT/PYTHONPATH, execs
+                         `python -m safari.desktop`
+  install.sh             Bash installer: desktop entry, hicolor icons,
+                         ~/.local/bin symlink, icon/desktop database refresh
+  python/safari/         the application (same code as the source tree)
+  vendor/                fastapi, starlette, uvicorn, httpx, python-dotenv
+  dist/                  the compiled client bundle
+  share/                 .desktop entry + 48/128/256/512 PNGs + SVG
+```
+
+`dist-linux/SafariAIDevStudio.AppDir` holds the same tree with an `AppRun`,
+ready for `appimagetool`. No step of the build or run touches Node except
+compiling the client.
+
+Startup order in `python/safari/desktop.py`:
+
+1. probe the port (`_port_available`) and exit 1 with a message if it is taken;
+2. run `uvicorn.Server` in a daemon thread, wait for `/api/health` (25 s budget);
+3. print the URL and workspace path — visible in a terminal, and the reason
+   `--server-only` works over SSH;
+4. open the first shell that exists: GTK3+WebKit2 → GTK4+WebKit6 → browser.
+
+`decide-policy` sends every navigation whose URI does not start with the app URL
+to `webbrowser.open()` and cancels it inside the window, so docs links never
+replace the app.
+
+### Config truth table
+
+| Situation | `ROOT` | workspace default | version source |
+| --- | --- | --- | --- |
+| source checkout | repo root | `<repo>/workspace` | `package.json` |
+| portable bundle (`SAFARI_PACKAGED=1`) | bundle dir | `~/SafariWorkspace` | `<bundle>/package.json` |
+| PyInstaller (`sys.frozen`) | `sys._MEIPASS` | `~/SafariWorkspace` | `safari/__init__.__version__` |
+
+`WORKSPACE_DIR` overrides the workspace in all three cases. Packaged installs
+also read `~/.config/safari-ai-dev-studio/.env` after the local `.env`.
+
+### Single-file binary
+
+`packaging/safari-dev-studio.spec` bundles interpreter + server + UI through
+PyInstaller (`console=True`, `--add-data dist:dist`). It requires a Python built
+with `--enable-shared`; Debian/Ubuntu's `python3` is linked statically unless
+`libpython3.X` is installed, which is why the portable bundle is the default
+artifact.
 
 ## Server modules
 

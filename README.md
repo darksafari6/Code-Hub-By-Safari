@@ -45,11 +45,13 @@ owns the workspace folder. API keys never leave the server.
 - **Problems** — live diagnostics from Monaco's TypeScript/JSON/CSS/HTML
   services.
 - **Menus** — File, Edit, Selection, View, Go, Terminal, AI and Help, in the app
-  bar and as a native Electron menu; every entry performs a real action.
+  bar (and in the native Electron menu when that optional shell is used); every
+  entry performs a real action.
 - **Command palette** — `Ctrl/Cmd + K`, plus quick open and a shortcut reference (`F1`).
-- **Desktop app** — Electron shell that starts the bundled server, with file
-  uploads, native menus, external links opened in your browser and a proper
-  Linux packaging pipeline.
+- **Desktop app** — a Python desktop shell (GTK3/WebKit2, GTK4/WebKit6, or the
+  system browser) that starts the server itself, keeps external links in your
+  real browser, and ships as a portable bundle with a `.desktop` entry, icons and
+  an installer — no Node at run time.
 
 ## Quick start
 
@@ -69,6 +71,21 @@ editing — replace it with your code or point `WORKSPACE_DIR` somewhere else.
 
 `make dev`, `make run`, `make test` and `make lint` wrap the same scripts.
 
+### Install the packaged application
+
+```bash
+make package                                    # build the bundle into dist-linux/
+tar xzf dist-linux/SafariAIDevStudio-*-x86_64.tar.gz
+cd SafariAIDevStudio-*/
+./install.sh                                    # menu entry, icons, ~/.local/bin
+safari-ai-dev-studio
+```
+
+The bundle contains the server, the built UI, the icons and every Python
+dependency. **Node is not required at run time** — only `python3` 3.11 or newer,
+which every Linux distribution ships. Nothing is downloaded on first launch, and
+`install.sh` is a plain Bash script you can read before running it.
+
 ### Why Python + Bash
 
 The first version ran everything in Node. Two things were impossible that way
@@ -79,13 +96,18 @@ without native addons, and both matter for a Linux development environment:
 | Full-screen terminal (vim, htop, ssh) | line-oriented `spawn` | real `pty.fork()` |
 | SSH remotes, hooks, worktrees | isomorphic-git subset | the real `git` binary |
 
-So the runtime is now a small FastAPI service (`python/safari/`) that owns the
-workspace, the PTY and git, while Bash scripts handle installing, running and
-testing. The React/Monaco frontend is unchanged and talks the same HTTP/WS
-contract; `capabilities` in `/api/system/info` tells it which terminal protocol
-to use. The Node server still exists as a compatibility backend
-(`npm run dev:node`, `npm run start:node`) until the packaging story moves to
-GTK/WebKit; `npm run dev` and `npm start` use Python.
+So the runtime is a small FastAPI service (`python/safari/`) that owns the
+workspace, the PTY and git, while Bash scripts handle installing, running,
+testing and packaging. The React/Monaco frontend is unchanged and talks the same
+HTTP/WS contract; `capabilities` in `/api/system/info` tells it which terminal
+protocol to use.
+
+The shipped application is pure Python on top of Linux: a native GTK/WebKitGTK
+window (`python/safari/desktop.py`), the real `git` binary, a real `pty`, and
+`./scripts/*.sh` for everything else. The Node server and the Electron shell are
+kept as optional development/compatibility paths (`npm run dev:node`,
+`npm run start:node`, `npm run desktop`) — they are not part of the release
+artifact.
 
 ### Enabling the assistant
 
@@ -125,12 +147,14 @@ missing instead of failing silently.
 | `./scripts/dev.sh` | Python API + Vite dev server with proxying |
 | `./scripts/run.sh` | Build the UI, then serve API + bundle from Python |
 | `./scripts/test.sh` | pytest + vitest + typecheck |
+| `./scripts/package-linux.sh` | Build the portable Linux bundle + tarball + AppDir |
 | `make lint` | ruff over `python/` |
 | `npm run build` | Static frontend bundle only |
 
-The Node-specific commands (`npm run dev:node`, `npm run start:node`,
-`npm run desktop`, `npm run dist:desktop`) still work while the Electron
-packaging is migrated.
+`./scripts/package-linux.sh` needs Node once (to compile the UI), a Python with
+`pip`, and `tar`. The resulting tarball needs neither. The Node-specific
+commands (`npm run dev:node`, `npm run start:node`, `npm run desktop`) remain
+available for development but are not used by the packaged application.
 
 ## Security model
 
@@ -193,24 +217,52 @@ multi-cursor behave exactly as they do in the editor.
 
 ## Desktop app
 
+The release build is a **Python + GTK application**, not an Electron one.
+`python/safari/desktop.py` starts uvicorn in a background thread, waits for
+`/api/health`, then presents the UI in the best available shell:
+
+| Priority | Shell | Requirements |
+| --- | --- | --- |
+| 1 | GTK3 + WebKit2 window | `python3-gi`, `gir1.2-webkit2-4.1` (Debian/Ubuntu), `webkit2gtk4.1` (Fedora) |
+| 2 | GTK4 + WebKit 6 window | `python3-gi`, `gir1.2-webkit-6.0` |
+| 3 | Default system browser | nothing — always available |
+
+External links (`https://…`) open in your real browser; only the app's own origin
+stays inside the window. Nothing is simulated: if no WebKit toolkit is installed
+the app still serves the identical UI through your browser and prints the URL.
+
 ```bash
-npm run build
-npm run dist:desktop        # -> release/*.AppImage, release/*.deb
+safari-ai-dev-studio                       # native window (or browser fallback)
+safari-ai-dev-studio --server-only --port 8080   # headless / over SSH
+safari-ai-dev-studio --browser             # force the browser
 ```
 
-The desktop shell prefers the **Python runtime** (`.venv`, a `SAFARI_PYTHON`
-override, or the system `python3`) and falls back to the bundled Node server when
-Python with FastAPI is unavailable. It stores its workspace in
-`~/Documents/SafariWorkspace` (override with `WORKSPACE_DIR`), and keeps a
-single-instance lock so two windows never fight over the port. Linux packages are
-produced with electron-builder (`AppImage` and `deb`, category Development).
+Packaged installs keep the workspace in `~/SafariWorkspace` (override with
+`WORKSPACE_DIR`); source checkouts keep using `./workspace` so the two never
+collide. Configuration is read from `.env`, then `~/.config/safari-ai-dev-studio/.env`.
 
-Bundling Python inside the package (PyInstaller) is the remaining packaging task;
-today the `.deb`/`.AppImage` ships the Node fallback unless a Python environment is
-present on the machine.
+### Building a single-file binary (optional)
 
-To work on the shell itself, run `npm run dev` in one terminal and `npm run
-desktop` in another: the Electron window loads the Vite dev server.
+`packaging/safari-dev-studio.spec` is a PyInstaller spec that embeds the
+interpreter, the server and the UI into one executable:
+
+```bash
+./scripts/install.sh && npm run build
+.venv/bin/pyinstaller packaging/safari-dev-studio.spec --noconfirm
+./dist/safari-ai-dev-studio
+```
+
+PyInstaller needs a Python built with `--enable-shared` (Debian/Ubuntu users:
+`sudo apt install libpython3.11`). Distributions that link `python3` statically
+cannot build it; the portable bundle above covers those machines without any
+build-time download.
+
+### Electron shell (development only)
+
+`npm run dev` + `npm run desktop` opens the same UI in an Electron window for
+frontend work; `npm run dist:desktop` still produces AppImage/deb via
+electron-builder, but that artifact ships the Node fallback and is no longer the
+recommended distribution channel.
 
 ## Architecture
 
@@ -218,12 +270,18 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the module map, HTTP API an
 terminal protocol. In short:
 
 ```
-server/            Express app, services, WebSocket terminal
-  lib/             files, git, terminal, ai, path safety
-  routes/          files, git, ai, system
+python/safari/     the runtime: FastAPI app, PTY, git, AI, desktop shell
+  app.py           HTTP + WebSocket API (34 routes)
+  pty_session.py   real pty.fork() sessions bridged to /ws/pty
+  gitrepo.py       the git binary, not a reimplementation
+  desktop.py       GTK/WebKit window, browser fallback, --server-only
+  config.py        paths, ports, keys; package-aware (FROZEN / SAFARI_PACKAGED)
+packaging/         PyInstaller spec, icons, desktop entry assets
+scripts/           install, dev, run, test, package-linux (Bash)
 src/               React client
   hooks/           settings, workspace, git, chat, hotkeys, diagnostics
   components/      layout, editor, panels, chat, terminal, ui
+server/            optional Node backend kept for compatibility
 tests/             Vitest unit tests for the tricky pure logic
 ```
 

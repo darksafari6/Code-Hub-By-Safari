@@ -79,3 +79,50 @@ jobs:
           if curl -fsS "http://127.0.0.1:8123/api/files/content?path=../package.json"; then
             echo "Path traversal was not blocked"; exit 1
           fi
+
+  bundle:
+    name: Portable Linux bundle
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install frontend dependencies
+        run: npm ci
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+
+      - name: Build the client bundle
+        run: npm run build:web
+
+      - name: Package the portable Linux application
+        run: PACKAGING_PYTHON="$(command -v python3)" ./scripts/package-linux.sh
+
+      - name: Smoke test the packaged bundle
+        run: |
+          cd dist-linux
+          tar xzf SafariAIDevStudio-*.tar.gz
+          cd SafariAIDevStudio-*/
+          ./safari-ai-dev-studio --server-only --port 8123 &
+          for attempt in $(seq 1 40); do
+            if curl -fsS http://127.0.0.1:8123/api/health > /dev/null; then break; fi
+            sleep 0.5
+          done
+          curl -fsS http://127.0.0.1:8123/api/health
+          curl -fsS http://127.0.0.1:8123/api/system/info | grep -q '"terminal": *"pty"'
+          curl -fsS http://127.0.0.1:8123/ | grep -q '<div id="root">'
+          if curl -fsS "http://127.0.0.1:8123/api/files/content?path=../package.json"; then
+            echo "Path traversal was not blocked"; exit 1
+          fi
+          test -f install.sh && test -f share/safari-ai-dev-studio.desktop
