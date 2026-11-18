@@ -1,26 +1,32 @@
 {
   "name": "safari-ai-dev-studio",
-  "version": "2.1.0",
+  "version": "3.0.0",
   "private": true,
   "type": "module",
-  "description": "An open-source, AI-assisted development environment for Linux desktops.",
+  "description": "An open-source, AI-assisted development environment for Linux: Python runtime, real PTY terminal, native git, React UI.",
   "license": "MIT",
   "main": "electron/main.cjs",
   "engines": {
     "node": ">=20.11"
   },
   "scripts": {
-    "dev": "tsx watch server/index.ts",
+    "dev": "./scripts/dev.sh",
     "build": "npm run clean && npm run build:web && npm run build:server",
     "build:web": "node scripts/build-web.mjs",
     "build:server": "esbuild server/index.ts --bundle --platform=node --format=esm --target=node20 --outfile=dist-server/index.js --packages=external",
-    "start": "node scripts/start.mjs",
+    "start": "./scripts/run.sh",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
     "clean": "rm -rf dist dist-server release",
     "desktop": "electron electron/main.cjs",
-    "dist:desktop": "npm run build && electron-builder --linux"
+    "dist:desktop": "npm run build && electron-builder --linux",
+    "dev:ui": "vite",
+    "dev:python": "./scripts/dev.sh",
+    "start:python": "./scripts/run.sh",
+    "test:python": "./scripts/test.sh",
+    "dev:node": "tsx watch server/index.ts",
+    "start:node": "node scripts/start.mjs"
   },
   "dependencies": {
     "@google/genai": "^1.46.0",

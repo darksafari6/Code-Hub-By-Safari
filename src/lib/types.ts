@@ -72,7 +72,15 @@ export interface SystemInfo {
   workspacePath: string;
   platform: string;
   arch: string;
-  nodeVersion: string;
+  /** Human readable runtime, e.g. "Python 3.11.2" or "Node 22.22.3". */
+  runtime: string;
+  nodeVersion?: string;
+  capabilities?: {
+    terminal: 'pty' | 'line';
+    git: 'cli' | 'isomorphic-git';
+    sshRemotes?: boolean;
+    shell?: string;
+  };
   workspaceEmpty: boolean;
   gitRepository: boolean;
   authEnabled: boolean;

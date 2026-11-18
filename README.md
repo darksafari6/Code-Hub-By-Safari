@@ -1,10 +1,11 @@
 # Safari AI Dev Studio
 
-An open-source, local-first development environment for Linux desktops. It ships
-as an Electron application (`.AppImage` / `.deb`) and also runs in the browser. It
-combines a code editor, file explorer, real terminal, git client with diff and
-branch management, and an AI assistant that can see and edit the file you are
-working on.
+An open-source, local-first development environment for Linux desktops. The
+runtime is **Python**, the tooling is **Bash**, and the real `git` and `bash`
+binaries do the actual work — no reimplementations. It ships as an Electron
+application (`.AppImage` / `.deb`) and also runs in the browser. It combines a
+code editor, file explorer, a true PTY terminal, git with diff and branch
+management, and an AI assistant that can see and edit the file you are working on.
 
 Everything runs on your machine: the web UI talks to a small Node server that
 owns the workspace folder. API keys never leave the server.
@@ -26,12 +27,14 @@ owns the workspace folder. API keys never leave the server.
   context menus, ignored `node_modules`/`dist`/`.git` and friends.
 - **Search** — fast literal search across the workspace with per-file grouping
   and jump-to-line.
-- **Terminal** — a real shell session over WebSocket: streaming output, command
-  history, `Ctrl+C` interrupt, working directory tracking, output limits.
-- **Source control** — initialise, clone (public or token), stage/unstage,
-  commit with a configurable author identity, create and switch branches, view a
-  line-by-line working-tree diff, discard changes, and push with isomorphic-git.
-  No git binary required.
+- **Terminal** — a genuine pseudo-terminal (`pty.fork()`) over WebSocket, so
+  vim, htop, less, ssh and any full-screen program work with correct colours and
+  window resizing. Keystrokes are forwarded verbatim; nothing is simulated.
+- **Source control** — driven by the real `git` CLI, so hooks, submodules,
+  worktrees, GPG signing, SSH remotes and your own git config all apply.
+  Initialise, clone, stage/unstage, commit with a configured identity, create and
+  switch branches, inspect a line-by-line working-tree diff, discard changes and
+  push with a token.
 - **Assistant** — streaming chat with Google Gemini, DeepSeek or any
   OpenAI-compatible endpoint. Sends the active file and any editor selection as
   context, discovers the models your key can reach, and lets you insert generated
@@ -50,18 +53,39 @@ owns the workspace folder. API keys never leave the server.
 
 ## Quick start
 
-Requirements: **Node.js 20.11+** (22 recommended).
+Requirements: **Python 3.11+**, **git**, and **Node.js 20.11+** (Node is only
+needed to build the UI).
 
 ```bash
 git clone https://github.com/darksafari6/Code-Hub-By-Safari.git
 cd Code-Hub-By-Safari
-npm install
+./scripts/install.sh      # .venv + pip deps + frontend deps
 cp .env.example .env      # optional: add an AI provider key
-npm run dev
+./scripts/dev.sh          # Python API on :8000, Vite on :3000
 ```
 
 Open <http://localhost:3000>. The `workspace/` folder is the project you are
 editing — replace it with your code or point `WORKSPACE_DIR` somewhere else.
+
+`make dev`, `make run`, `make test` and `make lint` wrap the same scripts.
+
+### Why Python + Bash
+
+The first version ran everything in Node. Two things were impossible that way
+without native addons, and both matter for a Linux development environment:
+
+| Need | Node version | Python version |
+| --- | --- | --- |
+| Full-screen terminal (vim, htop, ssh) | line-oriented `spawn` | real `pty.fork()` |
+| SSH remotes, hooks, worktrees | isomorphic-git subset | the real `git` binary |
+
+So the runtime is now a small FastAPI service (`python/safari/`) that owns the
+workspace, the PTY and git, while Bash scripts handle installing, running and
+testing. The React/Monaco frontend is unchanged and talks the same HTTP/WS
+contract; `capabilities` in `/api/system/info` tells it which terminal protocol
+to use. The Node server still exists as a compatibility backend
+(`npm run dev:node`, `npm run start:node`) until the packaging story moves to
+GTK/WebKit; `npm run dev` and `npm start` use Python.
 
 ### Enabling the assistant
 
@@ -95,31 +119,39 @@ missing instead of failing silently.
 
 ## Scripts
 
-| Command              | What it does                                              |
-| -------------------- | --------------------------------------------------------- |
-| `npm run dev`        | Development server with Vite middleware and hot reload    |
-| `npm run build`      | Production build (`dist/` + `dist-server/`)               |
-| `npm start`          | Run the production build                                  |
-| `npm run typecheck`  | Strict TypeScript check across client and server          |
-| `npm test`           | Unit tests (Vitest)                                       |
-| `npm run desktop`    | Open the Electron shell (expects a dev server)            |
-| `npm run dist:desktop` | Build AppImage / .deb into `release/`                   |
+| Command | What it does |
+| --- | --- |
+| `./scripts/install.sh` | Create `.venv`, install Python and frontend dependencies |
+| `./scripts/dev.sh` | Python API + Vite dev server with proxying |
+| `./scripts/run.sh` | Build the UI, then serve API + bundle from Python |
+| `./scripts/test.sh` | pytest + vitest + typecheck |
+| `make lint` | ruff over `python/` |
+| `npm run build` | Static frontend bundle only |
+
+The Node-specific commands (`npm run dev:node`, `npm run start:node`,
+`npm run desktop`, `npm run dist:desktop`) still work while the Electron
+packaging is migrated.
 
 ## Security model
 
 Running a terminal in a web UI needs care. What this project does:
 
 - **Path safety** — every file operation resolves through
-  `server/lib/safe-path.ts`, which rejects `..` traversal, NUL bytes and symlink
-  escapes. Only paths inside `WORKSPACE_DIR` are reachable.
-- **`.git` protection** — the generic file API cannot write into `.git`.
-- **Terminal scoping** — commands run with the workspace as their working
-  directory, and `cd` cannot climb above it.
-- **Secret isolation** — child processes receive an allow-listed environment
-  (`PATH`, `HOME`, `LANG`, …). `GEMINI_API_KEY`, `OPENAI_API_KEY` and friends are
+  `python/safari/paths.py`, which rejects `..` traversal, NUL bytes and symlink
+  escapes (`resolve()` follows links before the boundary check). Only paths
+  inside `WORKSPACE_DIR` are reachable.
+- **`.git` protection** — the generic file API cannot write into `.git`; git
+  operations go through the CLI with argv lists, never a shell.
+- **Terminal scope** — the PTY starts in the workspace with an allow-listed
+  environment. It is a real shell, so it can `cd` anywhere you can; that is the
+  point of a terminal, and it never sees your API keys.
+- **Secret isolation** — child processes and the PTY receive only `PATH`,
+  `HOME`, `LANG`, `TERM`, … `GEMINI_API_KEY`, `OPENAI_API_KEY` and friends are
   **not** visible to commands you run or code you execute.
 - **No keys in the browser** — AI calls are proxied by the server; the client
   bundle contains no credentials.
+- **Websocket hardening** — `/ws/pty` checks the access token and rejects
+  cross-origin upgrades.
 - **Origin checks** — WebSocket upgrades must come from the same host, blocking
   cross-site socket hijacking.
 - **Optional access token** — set `SAFARI_ACCESS_TOKEN` before exposing the IDE
@@ -166,11 +198,16 @@ npm run build
 npm run dist:desktop        # -> release/*.AppImage, release/*.deb
 ```
 
-The packaged app starts the bundled server on port 3000 and stores its workspace
-in `~/Documents/SafariWorkspace` (override with `WORKSPACE_DIR`). Linux packages
-are produced with electron-builder (`AppImage` and `deb`, category Development).
-The server runs as a plain Node child process (`ELECTRON_RUN_AS_NODE`), and the
-app keeps a single-instance lock so two windows never fight over the port.
+The desktop shell prefers the **Python runtime** (`.venv`, a `SAFARI_PYTHON`
+override, or the system `python3`) and falls back to the bundled Node server when
+Python with FastAPI is unavailable. It stores its workspace in
+`~/Documents/SafariWorkspace` (override with `WORKSPACE_DIR`), and keeps a
+single-instance lock so two windows never fight over the port. Linux packages are
+produced with electron-builder (`AppImage` and `deb`, category Development).
+
+Bundling Python inside the package (PyInstaller) is the remaining packaging task;
+today the `.deb`/`.AppImage` ships the Node fallback unless a Python environment is
+present on the machine.
 
 To work on the shell itself, run `npm run dev` in one terminal and `npm run
 desktop` in another: the Electron window loads the Vite dev server.

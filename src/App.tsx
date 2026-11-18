@@ -986,6 +986,7 @@ export default function App() {
             onTabChange={setBottomTab}
             visible={bottomVisible}
             height={bottomHeight}
+            terminalMode={info?.capabilities?.terminal ?? 'line'}
             theme={settings.theme}
             fontSize={settings.terminalFontSize}
             terminalHandle={terminalHandle}

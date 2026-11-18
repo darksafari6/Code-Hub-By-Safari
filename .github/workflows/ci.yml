@@ -34,9 +34,9 @@ jobs:
       - name: Build
         run: npm run build
 
-      - name: Smoke test the server
+      - name: Smoke test the legacy Node server
         run: |
-          npm start &
+          npm run start:node &
           for attempt in $(seq 1 40); do
             if curl -fsS http://127.0.0.1:3000/api/health > /dev/null; then break; fi
             sleep 0.5
@@ -44,5 +44,38 @@ jobs:
           curl -fsS http://127.0.0.1:3000/api/health
           curl -fsS http://127.0.0.1:3000/api/files/tree
           if curl -fsS "http://127.0.0.1:3000/api/files/content?path=../package.json"; then
+            echo "Path traversal was not blocked"; exit 1
+          fi
+
+  python:
+    name: Python runtime (pytest)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: python/requirements.txt
+
+      - name: Install dependencies
+        run: pip install -r python/requirements.txt pytest
+
+      - name: Unit tests (paths, git, PTY, HTTP API)
+        run: PYTHONPATH=python python -m pytest python/tests -q
+
+      - name: Smoke test the Python server
+        run: |
+          PYTHONPATH=python PORT=8123 python -m safari &
+          for attempt in $(seq 1 40); do
+            if curl -fsS http://127.0.0.1:8123/api/health > /dev/null; then break; fi
+            sleep 0.5
+          done
+          curl -fsS http://127.0.0.1:8123/api/health
+          curl -fsS http://127.0.0.1:8123/api/system/info | grep -q '"terminal": *"pty"'
+          if curl -fsS "http://127.0.0.1:8123/api/files/content?path=../package.json"; then
             echo "Path traversal was not blocked"; exit 1
           fi

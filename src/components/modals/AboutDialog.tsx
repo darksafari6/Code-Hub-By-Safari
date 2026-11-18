@@ -45,7 +45,14 @@ export function AboutDialog({
 
           <dt className="text-[color:var(--text-dim)]">Runtime</dt>
           <dd className="text-[color:var(--text)]">
-            Node {systemInfo?.nodeVersion ?? '—'}
+            {systemInfo?.runtime ?? '—'}
+          </dd>
+
+          <dt className="text-[color:var(--text-dim)]">Terminal</dt>
+          <dd className="text-[color:var(--text)]">
+            {systemInfo?.capabilities?.terminal === 'pty'
+              ? 'real PTY (full-screen programs supported)'
+              : 'line-oriented'}
           </dd>
 
           <dt className="text-[color:var(--text-dim)]">AI providers</dt>

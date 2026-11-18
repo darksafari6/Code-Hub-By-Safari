@@ -1,5 +1,64 @@
 # Architecture
 
+## Two runtimes, one contract
+
+The application is a React/Monaco frontend plus a backend that owns the
+workspace. The backend now has two implementations that speak the same HTTP and
+WebSocket contract:
+
+| | Python (`python/safari/`) | Node (`server/`) |
+| --- | --- | --- |
+| Status | **primary** | compatibility backend |
+| Started by | `./scripts/dev.sh`, `npm start` | `npm run dev:node`, `npm run start:node` |
+| Terminal | real PTY (`pty.fork()`) | line-oriented subprocess |
+| Git | the `git` CLI | isomorphic-git |
+| SSH remotes | yes | no |
+| Extra dependencies | FastAPI, uvicorn, httpx, python-dotenv | npm packages |
+
+The frontend reads `/api/system/info` and switches terminal protocol on
+`capabilities.terminal` (`pty` → `/ws/pty`, `line` → `/ws/terminal`). That keeps
+one client working against both servers without feature flags in the UI code.
+
+### Python package map
+
+```
+python/safari/
+  config.py       environment, limits, provider registry, ignore lists
+  paths.py        ApiError types, the path jail, allow-listed child env
+  files.py        tree, read/write, create, rename, delete, duplicate, upload, search
+  gitrepo.py      git CLI wrapper: status/log/diff/branches/commit/push/discard
+  pty_session.py  forkpty session, output queue, resize, process-group teardown
+  ai.py           Gemini + OpenAI-compatible streaming, model discovery, rate limit
+  app.py          FastAPI routes, auth guard, preview server, SPA host, /ws/pty
+  __main__.py     `python -m safari`
+python/tests/     pytest: path jail, git, PTY, HTTP contract, websocket auth
+```
+
+### Bash tooling
+
+`scripts/install.sh` creates `.venv` and installs both dependency sets;
+`scripts/dev.sh` runs the API and Vite with the proxy and cleans up both on exit;
+`scripts/run.sh` builds the UI and serves everything from Python;
+`scripts/test.sh` runs pytest, vitest and `tsc`. The `Makefile` exposes the same
+commands as `make install|dev|run|test|lint`.
+
+### PTY websocket protocol
+
+```
+client → server: {"type":"input","data":"ls\r"}
+                 {"type":"resize","cols":120,"rows":32}
+                 {"type":"ping"} | {"type":"restart"}
+server → client: {"type":"ready","cwd":"/path","pid":1234}
+                 {"type":"output","data":"…"}      # raw terminal bytes, UTF-8
+                 {"type":"exit","code":0}
+                 {"type":"error","message":"…"}
+```
+
+`pty.fork()` allocates a kernel PTY, so curses applications and ANSI colour work
+without translation. Output is read by a thread and delivered through a
+thread-safe queue, keeping the event loop free of blocking reads. On disconnect
+the whole process group receives SIGHUP → SIGTERM → SIGKILL.
+
 Safari AI Dev Studio is two programs in one repository:
 
 1. a **Node server** that owns the workspace (files, git, shell, AI proxying);
@@ -168,9 +227,13 @@ The pure logic that is easy to get wrong is extracted and unit tested:
 - `src/lib/markdown.ts` — assistant message rendering;
 - `src/lib/diff.ts` — the LCS line diff behind the diff viewer.
 
-`npm run typecheck` runs TypeScript in `strict` mode across client and server;
-CI runs typecheck, tests, build and an HTTP smoke test (including a traversal
-attempt that must fail).
+Python has its own suite (`python/tests`, 38 tests) covering the path jail
+(including a symlink escape), file CRUD, the git parser against real
+repositories, PTY behaviour (`/bin/sh` execution, working directory, window
+size, exit codes, secret isolation), the HTTP contract through the ASGI app, and
+websocket auth. `npm run typecheck` runs TypeScript in `strict` mode; CI runs
+typecheck, vitest, the frontend build, `pytest`, and HTTP smoke tests for both
+servers (each including a traversal attempt that must fail).
 
 ## Desktop bridge
 
@@ -182,6 +245,8 @@ renderer. `src/App.tsx` builds `menus: MenuDef[]` once per render and stores an
 id → action map in a ref, so the native menu and the in-app menu bar execute the
 same functions without duplicating code.
 
-The packaged app spawns `dist-server/index.js` with the user's workspace
-directory and waits for `/api/health` before loading the UI. If the bundle is
-missing it fails loudly instead of showing an empty window.
+The packaged app starts the Python runtime when it can find one (`.venv`,
+`SAFARI_PYTHON`, or `/usr/bin/python3` with the package on `PYTHONPATH`), waits
+for `/api/health`, and otherwise falls back to the bundled Node server
+(`dist-server/index.js` via `ELECTRON_RUN_AS_NODE`). If neither starts, it fails
+loudly instead of showing an empty window.

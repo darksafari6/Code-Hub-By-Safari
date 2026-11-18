@@ -10,6 +10,7 @@ import {
 import type { EditorProblem, BottomTab, ThemeMode } from '../../lib/types';
 import { cn } from '../../lib/utils';
 import { IconButton } from '../ui/IconButton';
+import { PtyTerminal } from './PtyTerminal';
 import { TerminalView, type TerminalHandle } from './TerminalView';
 
 interface BottomPanelProps {
@@ -17,6 +18,8 @@ interface BottomPanelProps {
   onTabChange: (tab: BottomTab) => void;
   visible: boolean;
   height: number;
+  /** `pty` when the backend owns a real pseudo-terminal. */
+  terminalMode: 'pty' | 'line';
   theme: ThemeMode;
   fontSize: number;
   terminalHandle: MutableRefObject<TerminalHandle | null>;
@@ -33,6 +36,7 @@ export function BottomPanel({
   onTabChange,
   visible,
   height,
+  terminalMode,
   theme,
   fontSize,
   terminalHandle,
@@ -117,13 +121,23 @@ export function BottomPanel({
             activeTab === 'terminal' ? 'visible' : 'invisible pointer-events-none',
           )}
         >
-          <TerminalView
-            visible={visible && activeTab === 'terminal'}
-            fontSize={fontSize}
-            theme={theme}
-            handleRef={terminalHandle}
-            onStatusChange={onTerminalStatus}
-          />
+          {terminalMode === 'pty' ? (
+            <PtyTerminal
+              visible={visible && activeTab === 'terminal'}
+              fontSize={fontSize}
+              theme={theme}
+              handleRef={terminalHandle}
+              onStatusChange={onTerminalStatus}
+            />
+          ) : (
+            <TerminalView
+              visible={visible && activeTab === 'terminal'}
+              fontSize={fontSize}
+              theme={theme}
+              handleRef={terminalHandle}
+              onStatusChange={onTerminalStatus}
+            />
+          )}
         </div>
 
         {activeTab === 'problems' && (

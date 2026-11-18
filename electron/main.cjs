@@ -178,6 +178,29 @@ function workspaceDirectory() {
   return path.join(app.getAppPath(), 'workspace');
 }
 
+/**
+ * Prefer the Python runtime (real PTY + real git). The packaged fallback is the
+ * bundled Node server, which is still shipped while PyInstaller packaging is
+ * being worked on.
+ */
+function resolvePythonRuntime() {
+  const pythonPackage = path.join(app.getAppPath(), 'python');
+  if (!fs.existsSync(path.join(pythonPackage, 'safari', '__main__.py'))) return null;
+
+  const candidates = [
+    process.env.SAFARI_PYTHON,
+    path.join(app.getAppPath(), '.venv', 'bin', 'python'),
+    '/usr/bin/python3',
+  ].filter(Boolean);
+
+  for (const candidate of candidates) {
+    if (fs.existsSync(candidate)) {
+      return { command: candidate, args: ['-m', 'safari'], pythonPath: pythonPackage };
+    }
+  }
+  return null;
+}
+
 function resolveServerEntry() {
   const candidates = [
     path.join(app.getAppPath(), 'dist-server', 'index.js'),
@@ -202,21 +225,11 @@ async function waitForServer(url, timeoutMs = 25_000) {
   return false;
 }
 
-function startServer() {
-  const entry = resolveServerEntry();
-  if (!entry) {
-    throw new Error(
-      'Production server bundle missing. Run `npm run build` before packaging the desktop app.',
-    );
-  }
-
-  // ELECTRON_RUN_AS_NODE turns the Electron binary into a plain Node runtime, so
-  // the bundled server runs exactly as it does under `npm start`. asar is
-  // disabled by the builder config, so `entry` is always a real file path.
-  serverProcess = spawn(process.execPath, [entry], {
+function spawnBackend(command, args, extraEnv, label) {
+  serverProcess = spawn(command, args, {
     env: {
       ...process.env,
-      ELECTRON_RUN_AS_NODE: '1',
+      ...extraEnv,
       NODE_ENV: 'production',
       PORT: String(PORT),
       HOST,
@@ -225,12 +238,52 @@ function startServer() {
     stdio: ['ignore', 'pipe', 'pipe'],
   });
 
-  serverProcess.stdout.on('data', (chunk) => process.stdout.write(`[server] ${chunk}`));
-  serverProcess.stderr.on('data', (chunk) => process.stderr.write(`[server] ${chunk}`));
+  serverProcess.stdout.on('data', (chunk) => process.stdout.write(`[${label}] ${chunk}`));
+  serverProcess.stderr.on('data', (chunk) => process.stderr.write(`[${label}] ${chunk}`));
   serverProcess.on('exit', (code) => {
-    console.log(`[server] exited with code ${code}`);
+    console.log(`[${label}] exited with code ${code}`);
     serverProcess = null;
   });
+}
+
+function stopBackend() {
+  if (!serverProcess) return;
+  serverProcess.kill('SIGTERM');
+  serverProcess = null;
+}
+
+/**
+ * Start the Python runtime first; fall back to the bundled Node server if it does
+ * not become healthy (for example, no FastAPI in the system interpreter).
+ */
+async function startBackend() {
+  const target = `http://${HOST}:${PORT}`;
+  const python = resolvePythonRuntime();
+
+  if (python) {
+    console.log(`[backend] starting Python runtime: ${python.command}`);
+    spawnBackend(python.command, python.args, { PYTHONPATH: python.pythonPath }, 'python');
+    if (await waitForServer(target, 20_000)) return;
+    console.warn('[backend] Python runtime did not start; falling back to the Node bundle');
+    stopBackend();
+  }
+
+  const entry = resolveServerEntry();
+  if (!entry) {
+    throw new Error(
+      'No backend available. Install the Python runtime (./scripts/install.sh) or run `npm run build`.',
+    );
+  }
+
+  // ELECTRON_RUN_AS_NODE turns the Electron binary into a plain Node runtime, so
+  // the bundled server runs exactly as it does under `npm start`. asar is
+  // disabled by the builder config, so `entry` is always a real file path.
+  console.log('[backend] starting bundled Node server');
+  spawnBackend(process.execPath, [entry], { ELECTRON_RUN_AS_NODE: '1' }, 'node');
+
+  if (!(await waitForServer(target, 25_000))) {
+    throw new Error('The local server did not start in time. Check the terminal output.');
+  }
 }
 
 async function createWindow() {
@@ -265,12 +318,8 @@ async function createWindow() {
 
   let target = DEV_URL;
   if (app.isPackaged) {
-    startServer();
+    await startBackend();
     target = `http://${HOST}:${PORT}`;
-    const ready = await waitForServer(target);
-    if (!ready) {
-      throw new Error('The local server did not start in time. Check the terminal output.');
-    }
   }
 
   await mainWindow.loadURL(target);

@@ -53,7 +53,13 @@ systemRouter.get(
       workspacePath: config.workspaceDir,
       platform: process.platform,
       arch: process.arch,
+      runtime: `Node ${process.versions.node}`,
       nodeVersion: process.versions.node,
+      capabilities: {
+        terminal: 'line',
+        git: 'isomorphic-git',
+        sshRemotes: false,
+      },
       workspaceEmpty,
       gitRepository: hasGitDirectory(),
       authEnabled: Boolean(config.accessToken),
