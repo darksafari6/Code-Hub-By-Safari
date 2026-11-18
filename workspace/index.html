@@ -1,16 +1,30 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Workspace App</title>
-    <style>
-        body { font-family: system-ui, sans-serif; padding: 2rem; background: #f9fafb; }
-        h1 { color: #4f46e5; }
-    </style>
-</head>
-<body>
-    <h1>Hello from Safari AI Dev Studio!</h1>
-    <p>Edit this file in the workspace to see live changes.</p>
-</body>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Safari workspace</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="card">
+      <span class="badge">workspace</span>
+      <h1>Hello from Safari AI Dev Studio</h1>
+      <p>
+        This page is served from your workspace folder. Edit
+        <code>index.html</code>, <code>styles.css</code> or <code>app.js</code> and
+        refresh the Preview panel to see the result.
+      </p>
+
+      <button id="counter" class="button" type="button">Clicked 0 times</button>
+
+      <ul class="hints">
+        <li>Ask the assistant to rewrite this page.</li>
+        <li>Open the terminal and run <code>ls -la</code>.</li>
+        <li>Initialise git from Source Control to track changes.</li>
+      </ul>
+    </main>
+
+    <script src="./app.js"></script>
+  </body>
 </html>

@@ -1,8 +1,28 @@
+# dependencies
 node_modules/
-build/
+
+# build output
 dist/
+dist-server/
+release/
+
+# logs and caches
+*.log
+npm-debug.log*
+.vite/
 coverage/
 .DS_Store
-*.log
-.env*
+Thumbs.db
+
+# environment
+.env
+.env.*
 !.env.example
+
+# editor files
+.idea/
+.vscode/*
+!.vscode/extensions.json
+
+# the IDE's runtime scratch space (not the user's workspace)
+.safari/

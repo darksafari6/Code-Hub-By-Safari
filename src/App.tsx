@@ -1,465 +1,489 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { Terminal } from 'xterm';
-import { FitAddon } from 'xterm-addon-fit';
-import 'xterm/css/xterm.css';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Toaster, toast } from 'sonner';
-import { GoogleGenAI } from '@google/genai';
-import { motion, AnimatePresence } from 'motion/react';
-import { cn } from './lib/utils';
 import { ActivityBar } from './components/layout/ActivityBar';
-import { SideBar } from './components/layout/SideBar';
-import { EditorArea } from './components/layout/EditorArea';
-import { BottomPanel } from './components/layout/BottomPanel';
-import { RightPanel } from './components/layout/RightPanel';
+import { RightDock } from './components/layout/RightDock';
 import { StatusBar } from './components/layout/StatusBar';
 import { TitleBar } from './components/layout/TitleBar';
-import { SettingsModal } from './components/modals/SettingsModal';
-import { CommandPalette } from './components/modals/CommandPalette';
+import { EditorPane } from './components/editor/EditorPane';
+import { Explorer } from './components/panels/Explorer';
+import { GitPanel } from './components/panels/GitPanel';
+import { SearchPanel } from './components/panels/SearchPanel';
+import { AssistantPanel } from './components/chat/AssistantPanel';
+import { PreviewPanel } from './components/preview/PreviewPanel';
+import { BottomPanel } from './components/terminal/BottomPanel';
+import { CommandPalette, type PaletteCommand } from './components/modals/CommandPalette';
+import { SettingsDialog } from './components/modals/SettingsDialog';
+import { PromptDialog } from './components/ui/PromptDialog';
+import { Splitter } from './components/ui/Splitter';
+import { useChat } from './hooks/useChat';
+import { useGit } from './hooks/useGit';
+import { useHotkeys } from './hooks/useHotkeys';
+import { useProblems } from './hooks/useProblems';
+import { useSettings } from './hooks/useSettings';
+import { useSystemInfo } from './hooks/useSystemInfo';
+import { useWorkspace } from './hooks/useWorkspace';
+import type { ChatContext } from './hooks/useChat';
+import type { TerminalHandle } from './components/terminal/TerminalView';
+import type {
+  BottomTab,
+  CursorPosition,
+  RightTab,
+  SidebarView,
+} from './lib/types';
+import { cn, flattenTree, modKey } from './lib/utils';
 
-// Initialize Gemini AI
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || '' });
+const clamp = (value: number, min: number, max: number): number =>
+  Math.min(Math.max(value, min), max);
 
 export default function App() {
-  // Layout State
-  const [activityBarTab, setActivityBarTab] = useState<'explorer' | 'search' | 'git' | 'ai'>('explorer');
-  const [isSideBarVisible, setIsSideBarVisible] = useState(true);
-  const [isTerminalVisible, setIsTerminalVisible] = useState(true);
-  const [activeBottomTab, setActiveBottomTab] = useState('terminal');
-  const [outputTab, setOutputTab] = useState('preview');
-  const [leftWidth, setLeftWidth] = useState(320);
-  const [rightWidth, setRightWidth] = useState(400);
-  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-  const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
-  const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const { settings, update, reset } = useSettings();
+  const workspace = useWorkspace({ autoSave: settings.autoSave });
+  const git = useGit();
+  const chat = useChat(settings.provider);
+  const { info, providers, online } = useSystemInfo();
+  const { problems, counts } = useProblems();
 
-  // File System State
-  const [files, setFiles] = useState<any[]>([]);
-  const [currentFile, setCurrentFile] = useState<string | null>(null);
-  const [fileContent, setFileContent] = useState('');
-  const [openFiles, setOpenFiles] = useState<string[]>([]);
+  const [sidebarView, setSidebarView] = useState<SidebarView>('explorer');
+  const [sidebarVisible, setSidebarVisible] = useState(true);
+  const [sidebarWidth, setSidebarWidth] = useState(280);
+  const [rightVisible, setRightVisible] = useState(() =>
+    typeof window === 'undefined' ? true : window.innerWidth >= 1024,
+  );
+  const [rightTab, setRightTab] = useState<RightTab>('assistant');
+  const [rightWidth, setRightWidth] = useState(420);
+  const [bottomVisible, setBottomVisible] = useState(true);
+  const [bottomHeight, setBottomHeight] = useState(200);
+  const [bottomTab, setBottomTab] = useState<BottomTab>('terminal');
+  const [terminalStatus, setTerminalStatus] = useState<'connecting' | 'open' | 'closed'>(
+    'connecting',
+  );
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [cursor, setCursor] = useState<CursorPosition>({ line: 1, column: 1 });
+  const [previewSignal, setPreviewSignal] = useState(0);
+  const [newEntry, setNewEntry] = useState<'file' | 'directory' | null>(null);
 
-  // AI State
-  const [chatHistory, setChatHistory] = useState<{role: string, content: string}[]>([]);
-  const [chatInput, setChatInput] = useState('');
-  const [isAiLoading, setIsAiLoading] = useState(false);
-  const [isAutoMode, setIsAutoMode] = useState(false);
-  const [autoModeState, setAutoModeState] = useState<'idle' | 'planning' | 'paused' | 'running' | 'completed' | 'error'>('idle');
-  const [executionPlan, setExecutionPlan] = useState<any[]>([]);
-  const [currentStepIndex, setCurrentStepIndex] = useState(0);
-  const [autoModeConfig, setAutoModeConfig] = useState({ maxRetries: 3, autoRollback: true });
-  const [selectedModel, setSelectedModel] = useState('DeepSeek-Coder');
+  const terminalHandle = useRef<TerminalHandle | null>(null);
 
-  // Git State
-  const [gitStatus, setGitStatus] = useState<any[]>([]);
-  const [isRepo, setIsRepo] = useState(false);
-  const [gitLog, setGitLog] = useState<any[]>([]);
-  const [gitUsername, setGitUsername] = useState('');
-  const [gitPassword, setGitPassword] = useState('');
-  const [gitCommitMessage, setGitCommitMessage] = useState('');
-  const [gitCloneUrl, setGitCloneUrl] = useState('');
-  const [isGitLoading, setIsGitLoading] = useState(false);
-
-  // System State
-  const [systemStats, setSystemStats] = useState({ cpu: '12%', ram: '4.2GB / 16GB', processes: 142 });
-  const [theme, setTheme] = useState('dark');
-  const [isOffline, setIsOffline] = useState(false);
-
-  // Refs
-  const terminalRef = useRef<HTMLDivElement>(null);
-  const xtermRef = useRef<Terminal | null>(null);
-  const wsRef = useRef<WebSocket | null>(null);
-  const resizeObserverRef = useRef<ResizeObserver | null>(null);
-  const autoModeStateRef = useRef(autoModeState);
+  const providerWarningShown = useRef(false);
 
   useEffect(() => {
-    autoModeStateRef.current = autoModeState;
-  }, [autoModeState]);
+    chat.setProvider(settings.provider);
+  }, [chat.setProvider, settings.provider]);
 
   useEffect(() => {
-    fetchFiles();
-    initTerminal();
-    fetchGitStatus();
-    
-    if (!process.env.GEMINI_API_KEY) {
-      console.warn('GEMINI_API_KEY is not set. AI features might not work.');
-      toast.warning('Gemini API key is missing. AI features will be limited.');
-    }
-
-    const interval = setInterval(() => {
-      setSystemStats({
-        cpu: `${Math.floor(Math.random() * 20 + 5)}%`,
-        ram: `${(Math.random() * 2 + 4).toFixed(1)}GB / 16GB`,
-        processes: Math.floor(Math.random() * 20 + 130)
+    if (!info || providerWarningShown.current) return;
+    providerWarningShown.current = true;
+    if (!info.providers.some((provider) => provider.configured)) {
+      toast.warning('No AI provider configured — add a key to .env to enable the assistant.', {
+        duration: 6000,
       });
-    }, 2000);
+    }
+  }, [info]);
 
-    return () => {
-      const term = xtermRef.current;
-      if (term) {
-        setTimeout(() => term.dispose(), 50);
-      }
-      wsRef.current?.close();
-      resizeObserverRef.current?.disconnect();
-      clearInterval(interval);
-    };
+  const openSearchResult = useCallback(
+    (path: string, line: number, column: number) => {
+      void workspace.openFile(path, { line, column });
+    },
+    [workspace],
+  );
+
+  const handleSave = useCallback(() => {
+    if (!workspace.activePath) return;
+    void workspace.saveFile(workspace.activePath).then(() => {
+      setPreviewSignal((value) => value + 1);
+    });
+  }, [workspace]);
+
+  const toggleAssistant = useCallback(() => {
+    if (rightVisible && rightTab === 'assistant') {
+      setRightVisible(false);
+      return;
+    }
+    setRightTab('assistant');
+    setRightVisible(true);
+  }, [rightTab, rightVisible]);
+
+  const togglePreview = useCallback(() => {
+    if (rightVisible && rightTab === 'preview') {
+      setRightVisible(false);
+      return;
+    }
+    setRightTab('preview');
+    setRightVisible(true);
+  }, [rightTab, rightVisible]);
+
+  const openSidebar = useCallback((view: SidebarView) => {
+    setSidebarView(view);
+    setSidebarVisible(true);
   }, []);
 
-  const fetchFiles = async () => {
-    try {
-      const res = await fetch('/api/files');
-      const data = await res.json();
-      setFiles(data);
-    } catch (e) {
-      toast.error('Failed to fetch files');
-    }
-  };
-
-  const openFile = async (path: string) => {
-    try {
-      const res = await fetch(`/api/files/read?path=${encodeURIComponent(path)}`);
-      if (res.ok) {
-        const content = await res.text();
-        setCurrentFile(path);
-        setFileContent(content);
-        if (!openFiles.includes(path)) {
-          setOpenFiles([...openFiles, path]);
-        }
-        toast.success(`Opened ${path.split('/').pop()}`);
-      }
-    } catch (e) {
-      toast.error('Failed to read file');
-    }
-  };
-
-  const closeFile = (path: string) => {
-    const newOpenFiles = openFiles.filter(f => f !== path);
-    setOpenFiles(newOpenFiles);
-    if (currentFile === path) {
-      if (newOpenFiles.length > 0) {
-        openFile(newOpenFiles[newOpenFiles.length - 1]);
-      } else {
-        setCurrentFile(null);
-        setFileContent('');
-      }
-    }
-  };
-
-  const saveFile = async (content: string) => {
-    if (!currentFile) return;
-    try {
-      await fetch('/api/files/write', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ path: currentFile, content })
-      });
-      setFileContent(content);
-      toast.success('File saved');
-      if (isRepo) fetchGitStatus();
-    } catch (e) {
-      toast.error('Failed to save file');
-    }
-  };
+  useHotkeys({
+    onSave: handleSave,
+    onCommandPalette: () => setPaletteOpen(true),
+    onQuickOpen: () => setPaletteOpen(true),
+    onToggleSidebar: () => setSidebarVisible((value) => !value),
+    onToggleTerminal: () => setBottomVisible((value) => !value),
+    onTogglePreview: togglePreview,
+    onOpenSettings: () => setSettingsOpen(true),
+  });
 
   useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
-        e.preventDefault();
-        setIsCommandPaletteOpen(prev => !prev);
-      }
-      if ((e.ctrlKey || e.metaKey) && e.key === 's') {
-        e.preventDefault();
-        if (currentFile && fileContent) {
-          saveFile(fileContent);
-        }
+    const flush = () => {
+      if (workspace.dirtyPaths.length > 0) {
+        toast.warning('You have unsaved changes.', { id: 'unsaved-warning' });
       }
     };
+    window.addEventListener('beforeunload', flush);
+    return () => window.removeEventListener('beforeunload', flush);
+  }, [workspace.dirtyPaths]);
 
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [currentFile, fileContent]);
-
-  const fetchGitStatus = async () => {
-    try {
-      const res = await fetch('/api/git/status');
-      const data = await res.json();
-      setGitStatus(data.status || []);
-      setIsRepo(data.isRepo);
-      if (data.isRepo) {
-        fetchGitLog();
-      }
-    } catch (e) {
-      console.error('Failed to fetch git status', e);
-    }
+  const activeContent = workspace.activePath
+    ? workspace.buffers[workspace.activePath]?.content ?? ''
+    : '';
+  const chatContext: ChatContext = {
+    filePath: workspace.activePath,
+    fileContent: activeContent,
   };
 
-  const fetchGitLog = async () => {
-    try {
-      const res = await fetch('/api/git/log');
-      const data = await res.json();
-      setGitLog(data.log || []);
-    } catch (e) {
-      console.error('Failed to fetch git log', e);
-    }
-  };
+  const activeProvider = providers.find((provider) => provider.id === settings.provider) ?? null;
+  const hasProvider = providers.some((provider) => provider.configured);
 
-  const initTerminal = () => {
-    if (!terminalRef.current) return;
-    terminalRef.current.innerHTML = '';
-    
-    const term = new Terminal({
-      theme: { background: '#1e1e1e' },
-      fontFamily: 'JetBrains Mono, monospace',
-      fontSize: 14
+  const commands: PaletteCommand[] = [
+    {
+      id: 'new-file',
+      label: 'New file',
+      hint: 'Create a file in the workspace',
+      group: 'File',
+      run: () => setNewEntry('file'),
+    },
+    {
+      id: 'new-folder',
+      label: 'New folder',
+      hint: 'Create a directory',
+      group: 'File',
+      run: () => setNewEntry('directory'),
+    },
+    {
+      id: 'save',
+      label: 'Save file',
+      hint: 'Write the active file to disk',
+      group: 'File',
+      run: handleSave,
+    },
+    {
+      id: 'close',
+      label: 'Close editor tab',
+      hint: 'Close the active file',
+      group: 'File',
+      run: () => {
+        if (workspace.activePath) workspace.closeFile(workspace.activePath);
+      },
+    },
+    {
+      id: 'refresh',
+      label: 'Refresh file tree',
+      hint: 'Reload the workspace listing',
+      group: 'View',
+      run: () => void workspace.refreshTree(),
+    },
+    {
+      id: 'sidebar',
+      label: 'Toggle sidebar',
+      hint: `${modKey()} B`,
+      group: 'View',
+      run: () => setSidebarVisible((value) => !value),
+    },
+    {
+      id: 'terminal',
+      label: 'Toggle terminal',
+      hint: `${modKey()} J`,
+      group: 'Terminal',
+      run: () => {
+        setBottomTab('terminal');
+        setBottomVisible((value) => !value);
+      },
+    },
+    {
+      id: 'problems',
+      label: 'Show problems',
+      hint: 'Diagnostics for open files',
+      group: 'View',
+      run: () => {
+        setBottomTab('problems');
+        setBottomVisible(true);
+      },
+    },
+    {
+      id: 'assistant',
+      label: 'Toggle assistant',
+      hint: 'AI chat about the current file',
+      group: 'AI',
+      run: toggleAssistant,
+    },
+    {
+      id: 'preview',
+      label: 'Toggle preview',
+      hint: 'Static preview of the workspace',
+      group: 'View',
+      run: togglePreview,
+    },
+    {
+      id: 'search',
+      label: 'Search in files',
+      hint: 'Find text across the workspace',
+      group: 'Navigate',
+      run: () => openSidebar('search'),
+    },
+    {
+      id: 'git',
+      label: 'Show source control',
+      hint: 'Commit, clone and push',
+      group: 'Navigate',
+      run: () => openSidebar('git'),
+    },
+    {
+      id: 'settings',
+      label: 'Open settings',
+      hint: `${modKey()} ,`,
+      group: 'System',
+      run: () => setSettingsOpen(true),
+    },
+  ];
+
+  if (!git.status.isRepo) {
+    commands.push({
+      id: 'git-init',
+      label: 'Initialise git repository',
+      hint: 'Create a repository on branch main',
+      group: 'Source control',
+      run: () => void git.init(),
     });
-    const fitAddon = new FitAddon();
-    term.loadAddon(fitAddon);
-    term.open(terminalRef.current);
-    
-    const fitTerminal = () => {
-      if (!term || !term.element || !term.element.parentElement) return;
-      if (term.element.clientWidth === 0 || term.element.clientHeight === 0) return;
-      try {
-        if ((term as any)._core?._renderService?.dimensions) {
-          fitAddon.fit();
-        }
-      } catch (e) {
-        console.warn('Terminal fit error', e);
-      }
-    };
-
-    setTimeout(fitTerminal, 100);
-    const resizeObserver = new ResizeObserver(() => fitTerminal());
-    resizeObserver.observe(terminalRef.current);
-    resizeObserverRef.current = resizeObserver;
-    xtermRef.current = term;
-
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const ws = new WebSocket(`${protocol}//${window.location.host}`);
-    wsRef.current = ws;
-
-    ws.onmessage = (event) => {
-      const msg = JSON.parse(event.data);
-      if (msg.type === 'terminal') term.write(msg.data);
-    };
-
-    term.onData((data) => {
-      ws.send(JSON.stringify({ type: 'terminal', data }));
-    });
-  };
-
-  const handleChatSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!chatInput.trim()) return;
-
-    const newHistory = [...chatHistory, { role: 'user', content: chatInput }];
-    setChatHistory(newHistory);
-    const currentInput = chatInput;
-    setChatInput('');
-    setIsAiLoading(true);
-
-    try {
-      if (selectedModel === 'DeepSeek-Coder') {
-        const res = await fetch('/api/ai/deepseek', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ 
-            prompt: currentInput,
-            context: `Current file: ${currentFile}\nContent:\n${fileContent}`,
-            isOffline,
-            model: selectedModel
-          })
-        });
-        
-        if (!res.ok) {
-          const errorData = await res.json();
-          throw new Error(errorData.error || 'Failed to get response from DeepSeek');
-        }
-
-        const data = await res.json();
-        setChatHistory([...newHistory, { role: 'ai', content: data.reply }]);
-      } else {
-        // Call Gemini directly from frontend
-        if (!process.env.GEMINI_API_KEY) {
-          throw new Error('Gemini API key is not configured. Please add it to your environment variables.');
-        }
-
-        const response = await ai.models.generateContent({
-          model: 'gemini-3-flash-preview',
-          contents: `Context:\nCurrent file: ${currentFile}\nContent:\n${fileContent}\n\nUser: ${currentInput}`,
-          config: {
-            systemInstruction: "You are a professional coding assistant. Provide concise and accurate answers."
-          }
-        });
-        
-        const reply = response.text;
-        if (!reply) throw new Error('Empty response from Gemini');
-        setChatHistory([...newHistory, { role: 'ai', content: reply }]);
-      }
-    } catch (e: any) {
-      console.error('AI Chat Error:', e);
-      toast.error('AI Chat Error: ' + (e.message || 'Unknown error'));
-      setChatHistory([...newHistory, { role: 'ai', content: `Error: ${e.message || 'I encountered an issue processing your request.'}` }]);
-    } finally {
-      setIsAiLoading(false);
-    }
-  };
-
-  const handleGitClone = async () => {
-    if (!gitCloneUrl) return;
-    setIsGitLoading(true);
-    try {
-      const res = await fetch('/api/git/clone', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url: gitCloneUrl, username: gitUsername, password: gitPassword })
-      });
-      if (res.ok) {
-        toast.success('Repository cloned successfully');
-        fetchGitStatus();
-        fetchFiles();
-        setGitCloneUrl('');
-      }
-    } catch (e) {
-      toast.error('Failed to clone repository');
-    } finally {
-      setIsGitLoading(false);
-    }
-  };
-
-  const handleGitCommit = async () => {
-    if (!gitCommitMessage) return;
-    setIsGitLoading(true);
-    try {
-      const res = await fetch('/api/git/commit', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: gitCommitMessage })
-      });
-      if (res.ok) {
-        toast.success('Changes committed');
-        setGitCommitMessage('');
-        fetchGitStatus();
-      }
-    } catch (e) {
-      toast.error('Failed to commit changes');
-    } finally {
-      setIsGitLoading(false);
-    }
-  };
-
-  const handleCommand = (command: string) => {
-    switch (command) {
-      case 'explorer': setActivityBarTab('explorer'); setIsSideBarVisible(true); break;
-      case 'search': setActivityBarTab('search'); setIsSideBarVisible(true); break;
-      case 'git': setActivityBarTab('git'); setIsSideBarVisible(true); break;
-      case 'ai': setActivityBarTab('ai'); setIsSideBarVisible(true); break;
-      case 'settings': setIsSettingsOpen(true); break;
-      case 'terminal': setIsTerminalVisible(!isTerminalVisible); break;
-      case 'auto-mode': setIsAutoMode(!isAutoMode); break;
-    }
-  };
+  }
 
   return (
-    <div className={cn(
-      "flex flex-col h-screen overflow-hidden select-none transition-colors duration-300",
-      theme === 'light' ? 'bg-zinc-50 text-zinc-900' : 'bg-[#1e1e1e] text-zinc-100'
-    )}>
-      <Toaster position="top-right" theme={theme === 'light' ? 'light' : 'dark'} richColors />
-      
-      <TitleBar 
-        currentFile={currentFile}
-        isAutoMode={isAutoMode}
-        onAutoModeToggle={() => setIsAutoMode(!isAutoMode)}
-        onMenuToggle={() => setIsMenuOpen(!isMenuOpen)}
+    <div className="flex h-screen flex-col overflow-hidden bg-app text-ink">
+      <Toaster
+        position="bottom-right"
+        theme={settings.theme}
+        richColors
+        closeButton
+        toastOptions={{ style: { fontSize: '12.5px' } }}
       />
 
-      <div className="flex flex-1 overflow-hidden relative">
-        <ActivityBar 
-          activeTab={activityBarTab}
-          setActiveTab={setActivityBarTab}
-          isSideBarVisible={isSideBarVisible}
-          setIsSideBarVisible={setIsSideBarVisible}
-          onSettingsOpen={() => setIsSettingsOpen(true)}
+      <TitleBar
+        workspaceName={info?.workspace ?? 'workspace'}
+        branch={git.status.branch}
+        onOpenPalette={() => setPaletteOpen(true)}
+        assistantOpen={rightVisible && rightTab === 'assistant'}
+        onToggleAssistant={toggleAssistant}
+        previewOpen={rightVisible && rightTab === 'preview'}
+        onTogglePreview={togglePreview}
+        online={online}
+        modKey={modKey()}
+      />
+
+      <div className="flex min-h-0 flex-1">
+        <ActivityBar
+          view={sidebarView}
+          onSelectView={openSidebar}
+          sidebarVisible={sidebarVisible}
+          onToggleSidebar={() => setSidebarVisible((value) => !value)}
+          assistantOpen={rightVisible && rightTab === 'assistant'}
+          onToggleAssistant={toggleAssistant}
+          onOpenSettings={() => setSettingsOpen(true)}
         />
 
-        <SideBar 
-          activeTab={activityBarTab}
-          isSideBarVisible={isSideBarVisible}
-          setIsSideBarVisible={setIsSideBarVisible}
-          files={files}
-          openFile={openFile}
-          currentFile={currentFile}
-          chatHistory={chatHistory}
-          chatInput={chatInput}
-          setChatInput={setChatInput}
-          handleChatSubmit={handleChatSubmit}
-          isAiLoading={isAiLoading}
-          selectedModel={selectedModel}
-          setSelectedModel={setSelectedModel}
-          isRepo={isRepo}
-          gitStatus={gitStatus}
-          gitCommitMessage={gitCommitMessage}
-          setGitCommitMessage={setGitCommitMessage}
-          handleGitCommit={handleGitCommit}
-          gitCloneUrl={gitCloneUrl}
-          setGitCloneUrl={setGitCloneUrl}
-          handleGitClone={handleGitClone}
-          isGitLoading={isGitLoading}
-          leftWidth={leftWidth}
-          setLeftWidth={setLeftWidth}
-        />
+        {sidebarVisible && (
+          <>
+            {/* All three views stay mounted so search results, expanded folders
+                and half-written commit messages survive switching tabs. */}
+            <div
+              className="relative flex min-h-0 shrink-0 flex-col overflow-hidden border-r border-line bg-panel"
+              style={{ width: sidebarWidth }}
+            >
+              <div
+                className={cn(
+                  'absolute inset-0',
+                  sidebarView !== 'explorer' && 'hidden',
+                )}
+              >
+                <Explorer
+                  tree={workspace.tree}
+                  loading={workspace.treeLoading}
+                  activePath={workspace.activePath}
+                  dirtyPaths={workspace.dirtyPaths}
+                  onOpen={(path) => void workspace.openFile(path)}
+                  onCreate={(path, type) => void workspace.createEntry(path, type)}
+                  onRename={(from, to) => void workspace.renameEntry(from, to)}
+                  onDelete={(path) => void workspace.deleteEntry(path)}
+                  onRefresh={() => void workspace.refreshTree()}
+                />
+              </div>
+              <div
+                className={cn('absolute inset-0', sidebarView !== 'search' && 'hidden')}
+              >
+                <SearchPanel onOpen={openSearchResult} />
+              </div>
+              <div
+                className={cn('absolute inset-0', sidebarView !== 'git' && 'hidden')}
+              >
+                <GitPanel git={git} onOpenFile={(path) => void workspace.openFile(path)} />
+              </div>
+            </div>
+            <Splitter
+              orientation="vertical"
+              label="Resize sidebar"
+              onResize={(delta) =>
+                setSidebarWidth((width) => clamp(width + delta, 200, 520))
+              }
+            />
+          </>
+        )}
 
-        <div className="flex-1 flex flex-col overflow-hidden relative bg-[#1e1e1e]">
-          <EditorArea 
-            openFiles={openFiles}
-            currentFile={currentFile}
-            openFile={openFile}
-            closeFile={closeFile}
-            fileContent={fileContent}
-            saveFile={saveFile}
-            theme={theme}
+        <main className="flex min-w-0 flex-1 flex-col">
+          <EditorPane
+            openPaths={workspace.openPaths}
+            activePath={workspace.activePath}
+            buffers={workspace.buffers}
+            dirtyPaths={workspace.dirtyPaths}
+            settings={settings}
+            reveal={workspace.reveal}
+            loadingPath={workspace.loadingPath}
+            onOpen={(path) => void workspace.openFile(path)}
+            onClose={workspace.closeFile}
+            onChange={workspace.updateContent}
+            onCursorChange={setCursor}
+            onNewFile={() => setNewEntry('file')}
+            onQuickOpen={() => setPaletteOpen(true)}
+            onSearch={() => openSidebar('search')}
+            onOpenGit={() => openSidebar('git')}
+            onToggleAssistant={toggleAssistant}
+            hasProvider={hasProvider}
+            providerLabel={activeProvider?.label ?? null}
           />
 
-          <BottomPanel 
-            activeBottomTab={activeBottomTab}
-            setActiveBottomTab={setActiveBottomTab}
-            terminalRef={terminalRef}
-            systemStats={systemStats}
-            isTerminalVisible={isTerminalVisible}
-            setIsTerminalVisible={setIsTerminalVisible}
-          />
-        </div>
+          {bottomVisible && (
+            <Splitter
+              orientation="horizontal"
+              label="Resize panel"
+              onResize={(delta) =>
+                setBottomHeight((height) =>
+                  clamp(height - delta, 120, Math.round(window.innerHeight * 0.75)),
+                )
+              }
+            />
+          )}
 
-        <RightPanel 
-          outputTab={outputTab}
-          setOutputTab={setOutputTab}
-          rightWidth={rightWidth}
-          setRightWidth={setRightWidth}
-        />
+          <BottomPanel
+            activeTab={bottomTab}
+            onTabChange={setBottomTab}
+            visible={bottomVisible}
+            height={bottomHeight}
+            theme={settings.theme}
+            fontSize={settings.terminalFontSize}
+            terminalHandle={terminalHandle}
+            terminalStatus={terminalStatus}
+            onTerminalStatus={setTerminalStatus}
+            onClose={() => setBottomVisible(false)}
+            problems={problems}
+            counts={counts}
+            onOpenProblem={(problem) =>
+              void workspace.openFile(problem.path, {
+                line: problem.line,
+                column: problem.column,
+              })
+            }
+          />
+        </main>
+
+        {rightVisible && (
+          <>
+            <Splitter
+              orientation="vertical"
+              label="Resize assistant panel"
+              onResize={(delta) =>
+                setRightWidth((width) => clamp(width - delta, 320, 720))
+              }
+            />
+            <RightDock
+              tab={rightTab}
+              onTabChange={setRightTab}
+              onClose={() => setRightVisible(false)}
+              width={rightWidth}
+              assistant={
+                <AssistantPanel
+                  chat={chat}
+                  providers={providers}
+                  activePath={workspace.activePath}
+                  context={chatContext}
+                  onOpenSettings={() => setSettingsOpen(true)}
+                />
+              }
+              preview={<PreviewPanel refreshSignal={previewSignal} />}
+            />
+          </>
+        )}
       </div>
 
-      <StatusBar 
-        gitBranch="main"
-        isOffline={isOffline}
-        isAutoMode={isAutoMode}
-        autoModeState={autoModeState}
+      <StatusBar
+        branch={git.status.branch}
+        remote={git.status.remote}
+        online={online}
+        activePath={workspace.activePath}
+        cursor={cursor}
+        tabSize={settings.tabSize}
+        errors={counts.errors}
+        warnings={counts.warnings}
+        provider={
+          activeProvider
+            ? {
+                label: activeProvider.label,
+                model: activeProvider.model,
+                configured: activeProvider.configured,
+              }
+            : null
+        }
+        version={info?.version ?? '2.0.0'}
+        onOpenProblems={() => {
+          setBottomTab('problems');
+          setBottomVisible(true);
+        }}
+        onOpenGit={() => openSidebar('git')}
       />
 
-      <SettingsModal 
-        isOpen={isSettingsOpen}
-        onClose={() => setIsSettingsOpen(false)}
-        config={autoModeConfig}
-        setConfig={setAutoModeConfig}
-        theme={theme}
-        setTheme={setTheme}
+      <CommandPalette
+        open={paletteOpen}
+        commands={commands}
+        files={flattenTree(workspace.tree)}
+        onClose={() => setPaletteOpen(false)}
+        onOpenFile={(path) => void workspace.openFile(path)}
       />
 
-      <CommandPalette 
-        isOpen={isCommandPaletteOpen}
-        onClose={() => setIsCommandPaletteOpen(false)}
-        onCommand={handleCommand}
-        files={files}
-        openFile={openFile}
+      <SettingsDialog
+        open={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
+        settings={settings}
+        update={update}
+        reset={reset}
+        providers={providers}
+        info={info}
+      />
+
+      <PromptDialog
+        open={newEntry !== null}
+        title={newEntry === 'directory' ? 'New folder' : 'New file'}
+        description="Relative to the workspace root"
+        label="Path"
+        placeholder={
+          newEntry === 'directory' ? 'src/components' : 'src/components/NewFile.tsx'
+        }
+        onCancel={() => setNewEntry(null)}
+        onConfirm={(value) => {
+          if (!newEntry) return;
+          void workspace.createEntry(value.replace(/^\/+/, ''), newEntry);
+          setNewEntry(null);
+        }}
       />
     </div>
   );
